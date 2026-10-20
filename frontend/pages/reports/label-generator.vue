@@ -37,25 +37,25 @@
   const BEHAVIOR_ITEM_NO_NAME = "item_no_name";
   const BEHAVIOR_ITEM_NO_LOCATION = "item_no_location";
 
-  const replaceHomeboxBehavior = ref(BEHAVIOR_SHOW);
-  const replaceHomeboxText = ref(labelBlankLine);
+  const replaceHomeboxBehavior = ref(BEHAVIOR_ALWAYS_REPLACE);
+  const replaceHomeboxText = ref("");
 
   const displayProperties = reactive({
     baseURL: window.location.origin,
     assetRange: 1,
     assetRangeMax: 91,
     skipLabels: 0,
-    measure: "in",
-    gapY: 0.25,
+    measure: "mm",
+    gapY: 0,
     columns: 3,
-    cardHeight: 1,
-    cardWidth: 2.63,
-    pageWidth: 8.5,
-    pageHeight: 11,
-    pageTopPadding: 0.52,
-    pageBottomPadding: 0.42,
-    pageLeftPadding: 0.25,
-    pageRightPadding: 0.1,
+    cardHeight: 37,
+    cardWidth: 70,
+    pageWidth: 210,
+    pageHeight: 297,
+    pageTopPadding: 0,
+    pageBottomPadding: 0,
+    pageLeftPadding: 0,
+    pageRightPadding: 0,
   });
 
   type LabelOptionInput = {
