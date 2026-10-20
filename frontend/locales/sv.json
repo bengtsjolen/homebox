@@ -870,7 +870,7 @@
             "input_placeholder": "Skriv här",
             "instruction_1": "HomeBox Label Generator är ett verktyg som hjälper dig att skriva ut etiketter för ditt HomeBox-inventering. Dessa är skapade\nför att skrivas ut i förväg så att de är redo att användas",
             "instruction_2": "Dessa etiketter fungerar då så att en QR-kod med en URL och ett objekt-ID skrivs ut på etiketten. Om du har stängt av\nObjekt-ID i dina HomeBox.inställningar kan du fortfarande använda verktyget men då kommer Objekt-ID:t inte att hänvisa till något objekt",
-            "instruction_3": "Den här funktionen befinner sig i ett tidigt utvecklingsstadium och kan komma att ändras i framtida versioner. Om du har feedback, vänligen\n ange den i<a href=\"https://github.com/sysadminsmedia/homebox/discussions/53\">'GitHub-diskussionen'</a>\"",
+            "instruction_3": "Den här funktionen befinner sig i ett tidigt utvecklingsstadium och kan komma att ändras i framtida versioner. Om du har feedback, vänligen\n ange den i '<a href=\"https://github.com/sysadminsmedia/homebox/discussions/53\">'GitHub-diskussionen'</a>'",
             "label_height": "Etiketthöjd",
             "label_width": "Etikettbredd",
             "measure_type": "Måttyp",
