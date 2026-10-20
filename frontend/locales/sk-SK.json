@@ -890,7 +890,7 @@
             "replace_homebox_text": "Text nahradenia",
             "skip_first_labels": "Preskočiť prvé etikety",
             "tip_1": "Predvolené nastavenia sú nastavené pre\n'<a href=\"https://www.avery.com/templates/5260\">'hárky štítkov Avery 5260'</a>'. Ak používate iný hárok,\nbudete musieť upraviť nastavenia tak, aby zodpovedali vášmu hárku.",
-            "tip_2": "Ak si upravujete hárok, rozmery sú v palcoch. Pri vytváraní hárku 5260 som zistil, že rozmery použité v jeho šablóne nezodpovedali tomu, čo bolo potrebné na tlač v rámci políčok.\n\n„<b>„Buďte pripravení na pokusy a omyly.“</b>“",
+            "tip_2": "Ak si upravujete hárok, rozmery sú v palcoch. Pri vytváraní hárku 5260 som zistil, že rozmery použité v jeho šablóne nezodpovedali tomu, čo bolo potrebné na tlač v rámci políčok.\n\n'<b>'Buďte pripravení na pokusy a omyly.'</b>'",
             "tip_3": "Pri tlači nezabudnite:\n'<ol><li>'Nastaviť okraje na 0 alebo Žiadne'</li><li>'Nastaviť mierku na 100 %'</li><li>'Zakázať obojstrannú tlač'</li><li>'Pred tlačou viacerých strán vytlačiť testovaciu stranu'</li></ol>'",
             "tips": "Tipy",
             "title": "Generátor štítkov",

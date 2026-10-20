@@ -340,7 +340,7 @@
                 "select_location": "Lagerort wählen"
             },
             "tree": {
-                "no_locations": "Keine Lagerorte verfügbar. Fügen Sie neue Lagerorte über die Schaltfläche `<span class=\"link-primary\">`Erstellen`</span>` hinzu."
+                "no_locations": "Keine Lagerorte verfügbar. Fügen Sie neue Lagerorte über die Schaltfläche '<span class=\"link-primary\">'Erstellen'</span>' hinzu."
             }
         },
         "quick_menu": {

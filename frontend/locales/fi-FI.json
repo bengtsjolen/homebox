@@ -763,9 +763,9 @@
             "replace_homebox_behavior_show_homebox": "Näytä \"HomeBox\"",
             "replace_homebox_text": "Korvaava teksti",
             "skip_first_labels": "Ohita ensimmäiset tarrat",
-            "tip_1": "Oletusasetukset on määritetty käytettäväksi <a href=\"https://www.avery.com/templates/5260\">Avery 5260 -tarra-arkkien</a> kanssa. Jos käytät eri arkkia, sinun täytyy säätää asetukset vastaamaan sitä.",
-            "tip_2": "Jos mukautat omaa arkkiasi, mitat ovat tuumina. Rakentaessani 5260-arkkia huomasin, että heidän mallinsa mitat eivät vastanneet sitä, mitä tarvittiin tulostamiseen laatikoiden sisään.\n<b>Valmistaudu kokeiluun ja virheisiin.</b>",
-            "tip_3": "Tulostettaessa varmista, että:\n<ol> <li>Asetat marginaalit arvoon 0 tai None</li> <li>Asetat skaalausprosentiksi 100%</li> <li>Poistat kaksipuolisen tulostuksen käytöstä</li> <li>Tulostat ensin testisivun ennen useamman sivun tulostamista</li> </ol>",
+            "tip_1": "Oletusasetukset on määritetty käytettäväksi '<a href=\"https://www.avery.com/templates/5260\">'Avery 5260 -tarra-arkkien'</a>' kanssa. Jos käytät eri arkkia, sinun täytyy säätää asetukset vastaamaan sitä.",
+            "tip_2": "Jos mukautat omaa arkkiasi, mitat ovat tuumina. Rakentaessani 5260-arkkia huomasin, että heidän mallinsa mitat eivät vastanneet sitä, mitä tarvittiin tulostamiseen laatikoiden sisään.\n'<b>'Valmistaudu kokeiluun ja virheisiin.'</b>'",
+            "tip_3": "Tulostettaessa varmista, että:\n '<ol><li>'Asetat marginaalit arvoon 0 tai None'</li><li>'Asetat skaalausprosentiksi 100%'</li><li>'Poistat kaksipuolisen tulostuksen käytöstä'</li><li>'Tulostat ensin testisivun ennen useamman sivun tulostamista'</li></ol>'",
             "tips": "Vinkit",
             "title": "Tarrojen luonti",
             "toast": {
@@ -813,7 +813,7 @@
             "set_primary_photo": "Aseta pääkuva",
             "set_primary_photo_button": "Aseta pääkuva",
             "set_primary_photo_confirm": "Haluatko varmasti asettaa pääkuvat? Prosessissa voi mennä hetki, eikä sitä voi perua.",
-            "set_primary_photo_sub": "Homebox versiossa v0.10.0 pääkuvakenttä lisättiin tyypin kuva liitteisiin. Tämä toiminto asettaa ensisijaiseksi kuvakentäksi tietokannan liitteet-taulukon ensimmäisen kuvan, jos sitä ei ole jo asetettu. '<a class=\"link\" href=\"https://github.com/hay-kot/homebox/pull/576\">'Katso GitHub PR #576\" </a>\"",
+            "set_primary_photo_sub": "Homebox versiossa v0.10.0 pääkuvakenttä lisättiin tyypin kuva liitteisiin. Tämä toiminto asettaa ensisijaiseksi kuvakentäksi tietokannan liitteet-taulukon ensimmäisen kuvan, jos sitä ei ole jo asetettu. '<a class=\"link\" href=\"https://github.com/hay-kot/homebox/pull/576\">'Katso GitHub PR #576'</a>'",
             "wipe_inventory": "Tyhjennä varasto",
             "wipe_inventory_button": "Tyhjennä varasto",
             "wipe_inventory_confirm": "Haluatko varmasti tyhjentää koko varastosi? Tämä poistaa kaikki esineet, eikä toimintoa voi perua.",
@@ -827,7 +827,7 @@
             "zero_datetimes_confirm": "Haluatko varmasti asettaa kaikki päivämäärä- ja aika-arvot oletusasetuksiin? Tässä voi mennä hetki, eikä toimintoa voi perua.",
             "zero_datetimes_sub": "Palauttaa varastosi kaikkien päivämääräkenttien aika-arvon päivämäärän alkuun. Tämän tarkoituksena on korjata virhe, joka otettiin käyttöön varhaisessa vaiheessa sivuston kehitystä, joka aiheutti aika-arvon tallentamisen ajan kanssa, joka aiheutti ongelmia päivämääräkentissä, jotka näyttävät tarkkoja arvoja. '<a class=\"link\" href=\"https://github.com/hay-kot/homebox/issues/236\" target=\"_blank\">'Katso Github Ongelma #236 lisää yksityiskohtia.'</a>'"
         },
-        "actions_sub": "Käytä toimintoja varastoon massatoimintoina. Nämä ovat peruuttamattomia toimia. '<b>'Ole varovainen.</b>'",
+        "actions_sub": "Käytä toimintoja varastoon massatoimintoina. Nämä ovat peruuttamattomia toimia. '<b>'Ole varovainen.'</b>'",
         "demo_mode_error": {
             "wipe_inventory": "Varastoa, tunnisteita, sijainteja ja ylläpitokirjauksia ei voida tyhjentää HomeBoxin ollessa demotilassa. Poistu demotilasta ja yritä uudelleen."
         },
@@ -839,7 +839,7 @@
             "import": "Tuo varasto",
             "import_button": "Tuo varasto",
             "import_ref_confirm": "Varmistaa, että kaikilla varastosi kohteilla on voimassa oleva import_ref-kenttä. Tämä tehdään luomalla satunnaisesti 8 merkin pituinen merkkijono jokaiselle kohteelle, jolla ei ole asetettua import_ref-kenttää.",
-            "import_sub": "Tuo CSV-standardimuodon Homebox. Ilman ‘<code>'HB.import_ref’</code>‘ kolumni, tämä tulee ’<b>‘not’</b>' korvaa inventaariossasi olevia esineitä, vaan lisää vain uusia esineitä. Rivit, joissa on ‘<code>'HB.import_ref’</code>' sarakkeen tiedot yhdistetään olemassa oleviin kohteisiin, joilla on sama import_ref, jos sellainen on olemassa."
+            "import_sub": "Tuo CSV-standardimuodon Homebox. Ilman '<code>'HB.import_ref'</code>' kolumni, tämä tulee '<b>'not'</b>' korvaa inventaariossasi olevia esineitä, vaan lisää vain uusia esineitä. Rivit, joissa on '<code>'HB.import_ref'</code>' sarakkeen tiedot yhdistetään olemassa oleviin kohteisiin, joilla on sama import_ref, jos sellainen on olemassa."
         },
         "import_export_sub": "Tuo ja vie varastosi CSV-tiedostoon. Tämä on hyödyllistä siirrettäessä varastosi uuteen Homebox-asennukseen.",
         "reports": "Raportit",

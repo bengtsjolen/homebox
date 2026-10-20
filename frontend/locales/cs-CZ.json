@@ -875,7 +875,7 @@
             "input_placeholder": "Zadejte zde",
             "instruction_1": "Generátor etiket HomeBox je nástroj, který vám pomůže tisknout etikety pro váš inventář HomeBox. Tyto etiket jsou\nurčeny k předběžnému tisku, takže můžete vytisknout mnoho etiket a mít je připravené k použití",
             "instruction_2": "Tyto etikety fungují tak, že na etiketu vytisknou QR kód adresy URL a ID majetku. Pokud jste zakázali ID majetku\n v nastavení HomeBoxu, můžete tento nástroj stále používat, ale ID majetku nebude odkazovat na žádnou položku",
-            "instruction_3": "Tato funkce je v rané fázi vývoje a v budoucích vydáních se může změnit, pokud máte zpětnou vazbu, uveďte ji\n prosím do ' <a href=\"https://github.com/sysadminsmedia/homebox/discussions/53\">'Diskuze na GitHubu'</a>'",
+            "instruction_3": "Tato funkce je v rané fázi vývoje a v budoucích vydáních se může změnit, pokud máte zpětnou vazbu, uveďte ji\n prosím do '<a href=\"https://github.com/sysadminsmedia/homebox/discussions/53\">'Diskuze na GitHubu'</a>'",
             "label_height": "Výška etikety",
             "label_width": "Šířka etikety",
             "measure_type": "Typ měření",
@@ -897,7 +897,7 @@
             "skip_first_labels": "Přeskočit první etikety",
             "tip_1": "Výchozí nastavení jsou nastavení pro\n '<a href=\"https://www.avery.com/templates/5260\">'archy štítků Avery 5260'</a>'. Pokud používáte jiný arch, musíte\n nastavení upravit tak, aby odpovídalo vašemu archu.",
             "tip_2": "Pokud si arch přizpůsobujete, rozměry jsou uvedeny v palcích. Při sestavování archu 5260 jsem zjistil,\n že rozměry použité v jejich šabloně neodpovídají tomu, co bylo potřeba vytisknout v rámci políček.\n '<b>'Připravte se na to, že budete muset použít metodu pokusu a omylu.'</b>'",
-            "tip_3": "Při tisku nezapomeňte:\n ‚<ol><li>'Nastavit okraje na 0 nebo Žádné‘</li><li>‚Nastavit měřítko na 100 %‘</li><li>‚Zakázat oboustranný tisk‘</li><li>‚Před tiskem více stránek vytisknout zkušební stránku‘</li></ol>'",
+            "tip_3": "Při tisku nezapomeňte:\n '<ol><li>'Nastavit okraje na 0 nebo Žádné'</li><li>'Nastavit měřítko na 100 %'</li><li>'Zakázat oboustranný tisk'</li><li>'Před tiskem více stránek vytisknout zkušební stránku'</li></ol>'",
             "tips": "Tipy",
             "title": "Generátor etiket",
             "toast": {

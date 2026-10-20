@@ -914,7 +914,7 @@
         "permission_denied": "Autorisation de la caméra refusée, veuillez autoriser l'accès à la caméra dans les paramètres de votre navigateur",
         "select_video_source": "Choisir une source vidéo",
         "title": "Numériser",
-        "unsupported": "L’API <i>Media Stream</i> n’est pas prise en charge sans HTTPS"
+        "unsupported": "L’API '<i>'Media Stream'</i>' n’est pas prise en charge sans HTTPS"
     },
     "scanner_ar": {
         "ar_mode": "Mode RA",

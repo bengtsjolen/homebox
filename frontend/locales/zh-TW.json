@@ -881,7 +881,7 @@
             "set_primary_photo": "自動設定封面圖片",
             "set_primary_photo_button": "自動設定",
             "set_primary_photo_confirm": "是否自動設定封面圖片？此作業將無法復原。",
-            "set_primary_photo_sub": "Homebox v0.10.0 (2023年10月10日發行)版本中加入主要封面功能。此功能可用於v0.10.0之前建立且無縮圖的物品，系統將自動使用物品中最早上傳圖片作為封面。‘<a class=\"link\" href=\"https://github.com/hay-kot/homebox/pull/576\">’詳細請見GitHub PR #576'</a>'",
+            "set_primary_photo_sub": "Homebox v0.10.0 (2023年10月10日發行)版本中加入主要封面功能。此功能可用於v0.10.0之前建立且無縮圖的物品，系統將自動使用物品中最早上傳圖片作為封面。'<a class=\"link\" href=\"https://github.com/hay-kot/homebox/pull/576\">'詳細請見GitHub PR #576'</a>'",
             "wipe_inventory": "清除所有收藏",
             "wipe_inventory_button": "清除所有收藏",
             "wipe_inventory_confirm": "是否確認清除所有收藏？此作業將刪除所有物品且無法復原。",
