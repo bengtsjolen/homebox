@@ -197,20 +197,31 @@
     }
   }
 
-  async function retrieveProductInfo(barcode: string) {
+  function normalizeBarcodeInput(raw: string): string | null {
+    const compact = raw.trim().replace(/[\s\p{Pd}]+/gu, "").toUpperCase();
+    // Digits cover UPC, EAN, and ISBN-13. Nine digits plus X is an ISBN-10.
+    if (/^[0-9]+$/.test(compact) || /^[0-9]{9}X$/.test(compact)) {
+      return compact;
+    }
+    return null;
+  }
+
+  async function retrieveProductInfo(raw: string) {
     errorMessage.value = null;
 
-    if (!barcode || barcode.trim().length === 0 || !/^[0-9]+$/.test(barcode)) {
+    const normalized = normalizeBarcodeInput(raw);
+    if (!normalized) {
       errorMessage.value = t("components.item.product_import.error_invalid_barcode");
       console.error(errorMessage.value);
       return;
     }
+    barcode.value = normalized;
 
     products.value = null;
     searching.value = true;
 
     try {
-      const result = await api.products.searchFromBarcode(barcode.trim());
+      const result = await api.products.searchFromBarcode(normalized);
       if (result.error) {
         errorMessage.value = t("errors.api_failure") + result.error;
         console.error(errorMessage.value);

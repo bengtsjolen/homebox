@@ -263,10 +263,10 @@
                 "open_new_tab": "Open in new tab"
             },
             "product_import": {
-                "barcode": "Product's barcode",
+                "barcode": "Product's barcode or ISBN",
                 "db_source": "DB source",
                 "error_exception": "Exception occured while retrieving item barcode: ",
-                "error_invalid_barcode": "Invalid barcode provided",
+                "error_invalid_barcode": "Invalid barcode or ISBN",
                 "error_not_found": "No product found with given barcode.",
                 "import_selected": "Import selected",
                 "search_item": "Search product",

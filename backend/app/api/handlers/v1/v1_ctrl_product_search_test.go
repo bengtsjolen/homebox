@@ -308,3 +308,147 @@ func TestSanitizeHeaderRemovesControlCharacters(t *testing.T) {
 		t.Fatalf("unexpected sanitized header: %q", got)
 	}
 }
+
+func TestCanonicalISBN13(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{in: "0-306-40615-2", want: "9780306406157", ok: true},
+		{in: "978-0-306-40615-7", want: "9780306406157", ok: true},
+		{in: "080442957X", want: "9780804429573", ok: true},
+		{in: "080442957x", want: "9780804429573", ok: true},
+		{in: "9780306406158", want: "", ok: false},
+		{in: "1234567890123", want: "", ok: false},
+		{in: "5035048748428", want: "", ok: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := canonicalISBN13(compactBarcode(tc.in))
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("got %q ok=%v, want %q ok=%v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestBuildOpenLibraryBarcodeProduct(t *testing.T) {
+	var book openLibraryBook
+	if err := json.Unmarshal([]byte(`{
+		"title": "Concrete Mathematics",
+		"authors": [{"name": "Ronald L. Graham"}, {"name": " Donald E. Knuth "}],
+		"publishers": [{"name": "Addison-Wesley"}],
+		"publish_date": "1994",
+		"number_of_pages": 657,
+		"cover": {"large": "http://covers.openlibrary.org/b/id/135182-L.jpg"}
+	}`), &book); err != nil {
+		t.Fatalf("unmarshal book: %v", err)
+	}
+
+	product, ok := buildOpenLibraryBarcodeProduct("9780306406157", book)
+	if !ok {
+		t.Fatal("expected product to be built")
+	}
+	if product.Item.Name != "Concrete Mathematics" {
+		t.Fatalf("unexpected title: %s", product.Item.Name)
+	}
+	if product.Manufacturer != "Ronald L. Graham, Donald E. Knuth" {
+		t.Fatalf("unexpected authors: %s", product.Manufacturer)
+	}
+	if product.Item.Description != "Addison-Wesley | 1994 | 657 pages | ISBN 9780306406157" {
+		t.Fatalf("unexpected description: %s", product.Item.Description)
+	}
+	if product.SearchEngineName != "openlibrary.org" {
+		t.Fatalf("unexpected source: %s", product.SearchEngineName)
+	}
+	if product.ImageURL != "https://covers.openlibrary.org/b/id/135182-L.jpg" {
+		t.Fatalf("unexpected cover: %s", product.ImageURL)
+	}
+}
+
+func TestBuildOpenLibraryBarcodeProductFallsBackToISBNCover(t *testing.T) {
+	product, ok := buildOpenLibraryBarcodeProduct("9780306406157", openLibraryBook{
+		Title: "Concrete Mathematics",
+		Cover: struct {
+			Small  string `json:"small"`
+			Medium string `json:"medium"`
+			Large  string `json:"large"`
+		}{Large: "https://example.com/cover.jpg"},
+	})
+	if !ok {
+		t.Fatal("expected product to be built")
+	}
+	if product.ImageURL != "https://covers.openlibrary.org/b/isbn/9780306406157-L.jpg?default=false" {
+		t.Fatalf("unexpected cover: %s", product.ImageURL)
+	}
+}
+
+func TestBuildOpenLibraryBarcodeProductRequiresTitle(t *testing.T) {
+	_, ok := buildOpenLibraryBarcodeProduct("9780306406157", openLibraryBook{})
+	if ok {
+		t.Fatal("expected a book without a title to be ignored")
+	}
+}
+
+func TestBarcodeSearchIncludesOpenLibraryForISBN(t *testing.T) {
+	originalClient := barcodeHTTPClient
+	barcodeHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusNotFound
+		body := ""
+		if r.URL.Host == "openlibrary.org" {
+			if !strings.Contains(r.Header.Get("User-Agent"), "Homebox/1.0 (contact: owner@example.com)") {
+				t.Errorf("unexpected user agent %q", r.Header.Get("User-Agent"))
+			}
+			if r.URL.Query().Get("bibkeys") != "ISBN:9780306406157" {
+				t.Errorf("unexpected bibkeys %q", r.URL.Query().Get("bibkeys"))
+			}
+			status = http.StatusOK
+			body = `{
+				"ISBN:9780306406157": {
+					"title": "Concrete Mathematics",
+					"authors": [{"name": "Ronald L. Graham"}],
+					"publishers": [{"name": "Addison-Wesley"}],
+					"publish_date": "1994",
+					"number_of_pages": 657,
+					"cover": {"large": "https://covers.openlibrary.org/b/id/135182-L.jpg"}
+				}
+			}`
+		}
+
+		return &http.Response{
+			StatusCode: status,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+	t.Cleanup(func() { barcodeHTTPClient = originalClient })
+
+	handler := (&V1Controller{}).HandleProductSearchFromBarcode(config.BarcodeAPIConf{
+		OpenFoodFactsContact: "owner@example.com",
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?productEAN=0-306-40615-2", nil)
+	if err := handler(recorder, request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", recorder.Code, recorder.Body.String())
+	}
+
+	var products []repo.BarcodeProduct
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(products) != 1 {
+		t.Fatalf("expected one product, got %+v", products)
+	}
+	if products[0].SearchEngineName != "openlibrary.org" || products[0].Item.Name != "Concrete Mathematics" {
+		t.Fatalf("unexpected product: %+v", products[0])
+	}
+	if products[0].Barcode != "9780306406157" {
+		t.Fatalf("expected canonical ISBN, got %s", products[0].Barcode)
+	}
+}

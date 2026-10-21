@@ -9,9 +9,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/hay-kot/httpkit/errchain"
 	"github.com/hay-kot/httpkit/server"
@@ -411,6 +413,227 @@ func lookupOpenFacts(contact string, source openFactsSource, iEan string) ([]rep
 	return []repo.BarcodeProduct{p}, nil
 }
 
+const openLibraryCoverHost = "covers.openlibrary.org"
+
+type openLibraryBook struct {
+	Title   string `json:"title"`
+	Authors []struct {
+		Name string `json:"name"`
+	} `json:"authors"`
+	Publishers []struct {
+		Name string `json:"name"`
+	} `json:"publishers"`
+	PublishDate   string         `json:"publish_date"`
+	NumberOfPages flexibleString `json:"number_of_pages"`
+	Cover         struct {
+		Small  string `json:"small"`
+		Medium string `json:"medium"`
+		Large  string `json:"large"`
+	} `json:"cover"`
+}
+
+// compactBarcode removes spaces and dashes and uppercases a trailing ISBN-10 X.
+func compactBarcode(raw string) string {
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.Is(unicode.Dash, r) {
+			continue
+		}
+		b.WriteRune(unicode.ToUpper(r))
+	}
+	return b.String()
+}
+
+func isbn13CheckDigit(digits12 string) byte {
+	sum := 0
+	for i := 0; i < 12; i++ {
+		n := int(digits12[i] - '0')
+		if i%2 == 0 {
+			sum += n
+		} else {
+			sum += n * 3
+		}
+	}
+	return byte('0' + (10-(sum%10))%10)
+}
+
+func validISBN10(code string) bool {
+	if len(code) != 10 {
+		return false
+	}
+
+	sum := 0
+	for i := 0; i < 10; i++ {
+		var value int
+		switch c := code[i]; {
+		case c >= '0' && c <= '9':
+			value = int(c - '0')
+		case i == 9 && c == 'X':
+			value = 10
+		default:
+			return false
+		}
+		sum += value * (10 - i)
+	}
+	return sum%11 == 0
+}
+
+func validISBN13(code string) bool {
+	if len(code) != 13 || (!strings.HasPrefix(code, "978") && !strings.HasPrefix(code, "979")) {
+		return false
+	}
+	for i := 0; i < 13; i++ {
+		if code[i] < '0' || code[i] > '9' {
+			return false
+		}
+	}
+	return code[12] == isbn13CheckDigit(code[:12])
+}
+
+// canonicalISBN13 reports the ISBN-13 for a compact ISBN-10 or ISBN-13.
+// Other product codes are left for the retail barcode providers.
+func canonicalISBN13(compact string) (string, bool) {
+	switch {
+	case validISBN13(compact):
+		return compact, true
+	case validISBN10(compact):
+		body := "978" + compact[:9]
+		return body + string(isbn13CheckDigit(body)), true
+	default:
+		return "", false
+	}
+}
+
+func isAllowedOpenLibraryImageHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == openLibraryCoverHost || strings.HasSuffix(host, "."+openLibraryCoverHost)
+}
+
+func normalizeOpenLibraryImageURL(imageURL string) string {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return ""
+	}
+
+	u, err := url.Parse(imageURL)
+	if err != nil || u.Hostname() == "" || u.User != nil {
+		return ""
+	}
+
+	switch u.Scheme {
+	case "http":
+		u.Scheme = schemeHTTPS
+	case schemeHTTPS:
+	default:
+		return ""
+	}
+
+	if !isAllowedOpenLibraryImageHost(u.Hostname()) {
+		return ""
+	}
+
+	return u.String()
+}
+
+func openLibraryCoverURL(isbn13 string, book openLibraryBook) string {
+	candidate := normalizeOpenLibraryImageURL(firstNonEmpty(book.Cover.Large, book.Cover.Medium, book.Cover.Small))
+	if candidate != "" {
+		return candidate
+	}
+	return "https://" + openLibraryCoverHost + "/b/isbn/" + isbn13 + "-L.jpg?default=false"
+}
+
+func buildOpenLibraryBarcodeProduct(isbn13 string, book openLibraryBook) (repo.BarcodeProduct, bool) {
+	title := strings.TrimSpace(book.Title)
+	if title == "" {
+		return repo.BarcodeProduct{}, false
+	}
+
+	authors := make([]string, 0, len(book.Authors))
+	for _, author := range book.Authors {
+		name := strings.TrimSpace(author.Name)
+		if name != "" {
+			authors = append(authors, name)
+		}
+	}
+
+	publishers := make([]string, 0, len(book.Publishers))
+	for _, publisher := range book.Publishers {
+		name := strings.TrimSpace(publisher.Name)
+		if name != "" {
+			publishers = append(publishers, name)
+		}
+	}
+
+	descriptionParts := make([]string, 0, 4)
+	if len(publishers) > 0 {
+		descriptionParts = append(descriptionParts, strings.Join(publishers, ", "))
+	}
+	if date := strings.TrimSpace(book.PublishDate); date != "" {
+		descriptionParts = append(descriptionParts, date)
+	}
+	if pages, err := strconv.Atoi(string(book.NumberOfPages)); err == nil && pages > 0 {
+		descriptionParts = append(descriptionParts, fmt.Sprintf("%d pages", pages))
+	}
+	descriptionParts = append(descriptionParts, "ISBN "+isbn13)
+
+	var p repo.BarcodeProduct
+	p.Barcode = isbn13
+	p.SearchEngineName = "openlibrary.org"
+	p.Item.Name = title
+	p.Manufacturer = strings.Join(authors, ", ")
+	p.Item.Description = strings.Join(descriptionParts, " | ")
+	p.ImageURL = openLibraryCoverURL(isbn13, book)
+
+	return p, true
+}
+
+func lookupOpenLibrary(contact string, isbn13 string) ([]repo.BarcodeProduct, error) {
+	endpoint := "https://openlibrary.org/api/books?bibkeys=ISBN:" + url.QueryEscape(isbn13) + "&format=json&jscmd=data"
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	userAgent := "Homebox/1.0 (https://github.com/sysadminsmedia/homebox)"
+	safeContact := sanitizeHeader(strings.TrimSpace(contact))
+	if len(safeContact) > 0 {
+		userAgent = "Homebox/1.0 (contact: " + safeContact + ")"
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := barcodeHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openlibrary.org API returned status code: %d", resp.StatusCode)
+	}
+
+	var result map[string]openLibraryBook
+	if err := decodeBarcodeResponse(resp.Body, &result); err != nil {
+		log.Error().Msg("Can not unmarshal openlibrary.org JSON")
+		return nil, err
+	}
+
+	for _, book := range result {
+		p, ok := buildOpenLibraryBarcodeProduct(isbn13, book)
+		if ok {
+			return []repo.BarcodeProduct{p}, nil
+		}
+	}
+
+	return nil, nil
+}
+
 // fetchImageBase64 fetches an image from the given HTTPS URL and returns it as a base64-encoded data URI.
 func fetchImageBase64(imageURL string) (string, error) {
 	res, err := barcodeHTTPClient.Get(imageURL)
@@ -482,6 +705,18 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 		// prevent already available results from reaching the client.
 		allowSlowResponse(w, r)
 
+		// Spaces and dashes are ignored. An ISBN-10 is searched as its ISBN-13
+		// so every provider sees one code, and Open Library is only asked for
+		// real ISBNs.
+		searchCode := compactBarcode(q.EAN)
+		isbn13, isISBN := canonicalISBN13(searchCode)
+		if isISBN {
+			searchCode = isbn13
+		}
+		if searchCode == "" {
+			return server.JSON(w, http.StatusNoContent, nil)
+		}
+
 		// www.ean-search.org/: not free
 
 		// Example code: dewalt 5035048748428
@@ -491,14 +726,14 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 		}
 		lookups := []lookup{{
 			name: "upcitemdb.com",
-			run:  func() ([]repo.BarcodeProduct, error) { return lookupUPCItemDB(q.EAN) },
+			run:  func() ([]repo.BarcodeProduct, error) { return lookupUPCItemDB(searchCode) },
 		}}
 
 		if conf.TokenBarcodespider != "" {
 			lookups = append(lookups, lookup{
 				name: "barcodespider.com",
 				run: func() ([]repo.BarcodeProduct, error) {
-					return lookupBarcodespider(conf.TokenBarcodespider, q.EAN)
+					return lookupBarcodespider(conf.TokenBarcodespider, searchCode)
 				},
 			})
 		}
@@ -507,7 +742,16 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 			lookups = append(lookups, lookup{
 				name: source.Name,
 				run: func() ([]repo.BarcodeProduct, error) {
-					return lookupOpenFacts(conf.OpenFoodFactsContact, source, q.EAN)
+					return lookupOpenFacts(conf.OpenFoodFactsContact, source, searchCode)
+				},
+			})
+		}
+
+		if isISBN {
+			lookups = append(lookups, lookup{
+				name: "openlibrary.org",
+				run: func() ([]repo.BarcodeProduct, error) {
+					return lookupOpenLibrary(conf.OpenFoodFactsContact, isbn13)
 				},
 			})
 		}

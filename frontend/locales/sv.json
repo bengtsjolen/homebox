@@ -263,10 +263,10 @@
                 "open_new_tab": "Öppna i ny flik"
             },
             "product_import": {
-                "barcode": "Produktens streckkod",
+                "barcode": "Produktens streckkod eller ISBN",
                 "db_source": "DB källa",
                 "error_exception": "Undantag inträffade vid hämtning av artikelstreckkod: ",
-                "error_invalid_barcode": "Ogiltig streckkod",
+                "error_invalid_barcode": "Ogiltig streckkod eller ISBN",
                 "error_not_found": "Ingen produkt hittad med angiven streckkod.",
                 "import_selected": "Importera valda",
                 "search_item": "Sök produkt",
