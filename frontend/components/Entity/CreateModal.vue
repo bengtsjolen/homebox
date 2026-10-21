@@ -553,18 +553,29 @@
 
   onMounted(() => {
     const cleanup = registerOpenDialogCallback(DialogID.CreateEntity, async params => {
-      subItemCreate.value = false;
+      const product = params.baseType === "item" ? params.product : undefined;
+      // A barcode lookup closes this dialog and opens it again. Keep a parent
+      // the user already chose, such as the box a book is being scanned into.
+      const keepChosenParent = Boolean(product && subItemCreate.value && parent.value?.id);
       let parentItemLocationId = null;
-      parent.value = {};
-      resolvedParent.value = null;
-      form.parentId = null;
+
+      if (!keepChosenParent) {
+        subItemCreate.value = false;
+        parent.value = {};
+        resolvedParent.value = null;
+        form.parentId = null;
+      }
 
       if (params.baseType === "item") {
         selectedEntityType.value = entityTypes.value.find(t => !t.isLocation) || null;
 
-        subItemCreate.value = params.subItem;
+        if (!keepChosenParent) {
+          // Scanning while a box is open should put the book in that box, not
+          // only in the shelf the box sits on.
+          subItemCreate.value = Boolean(params.subItem) || Boolean(product && itemId.value);
+        }
 
-        if (subItemCreate.value && itemId.value) {
+        if (!keepChosenParent && subItemCreate.value && itemId.value) {
           const itemIdRead = typeof itemId.value === "string" ? (itemId.value as string) : itemId.value[0]!;
           const { data, error } = await api.items.get(itemIdRead);
           if (error || !data) {
@@ -582,6 +593,11 @@
         }
 
         if (params.product) {
+          // A template's defaults would replace the looked-up book, and the
+          // template create path would drop the chosen parent item.
+          selectedTemplate.value = null;
+          templateData.value = null;
+          templateUserSelected.value = false;
           form.name = params.product.item.name;
           form.description = params.product.item.description;
           // Carry the looked-up identifications into the create payload so the
@@ -611,17 +627,19 @@
         selectedEntityType.value = entityTypes.value.find(t => t.isLocation) || null;
       }
 
-      const locId = locationId.value ? locationId.value : parentItemLocationId;
+      if (!keepChosenParent) {
+        const locId = locationId.value ? locationId.value : parentItemLocationId;
 
-      if (locId) {
-        const found = locations.value.find(l => l.id === locId);
-        if (found) {
-          form.location = found;
+        if (locId) {
+          const found = locations.value.find(l => l.id === locId);
+          if (found) {
+            form.location = found;
+          }
         }
-      }
 
-      if (tagId.value) {
-        form.tags = tags.value.filter(l => l.id === tagId.value).map(l => l.id);
+        if (tagId.value) {
+          form.tags = tags.value.filter(l => l.id === tagId.value).map(l => l.id);
+        }
       }
     });
 
@@ -671,11 +689,17 @@
       error = result.error;
       data = result.data;
     } else if (templateData.value) {
-      // If a template is selected, use the template creation endpoint
+      // If a template is selected, use the template creation endpoint.
+      // A chosen parent item wins over the location, same as a normal create.
+      const chosenLocationId = (form.location?.id as string) || null;
       const templateRequest = {
         name: form.name,
         description: form.description,
-        parentId: form.location.id as string,
+        parentId: form.parentId || (form.location.id as string),
+        locationId:
+          form.parentId && chosenLocationId && chosenLocationId !== inheritedLocationId.value
+            ? chosenLocationId
+            : undefined,
         tagIds: form.tags,
         quantity: form.quantity,
         entityTypeId: selectedEntityType.value?.id || "",
