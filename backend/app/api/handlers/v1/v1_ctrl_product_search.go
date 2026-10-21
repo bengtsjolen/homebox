@@ -634,6 +634,262 @@ func lookupOpenLibrary(contact string, isbn13 string) ([]repo.BarcodeProduct, er
 	return nil, nil
 }
 
+const (
+	barcodeDescriptionLimit = 1000
+	googleBooksImageHost    = "books.google.com"
+)
+
+type googleBooksVolume struct {
+	VolumeInfo struct {
+		Title         string   `json:"title"`
+		Subtitle      string   `json:"subtitle"`
+		Authors       []string `json:"authors"`
+		Publisher     string   `json:"publisher"`
+		PublishedDate string   `json:"publishedDate"`
+		Description   string   `json:"description"`
+		PageCount     int      `json:"pageCount"`
+		ImageLinks    struct {
+			SmallThumbnail string `json:"smallThumbnail"`
+			Thumbnail      string `json:"thumbnail"`
+			Small          string `json:"small"`
+			Medium         string `json:"medium"`
+			Large          string `json:"large"`
+			ExtraLarge     string `json:"extraLarge"`
+		} `json:"imageLinks"`
+		IndustryIdentifiers []struct {
+			Type       string `json:"type"`
+			Identifier string `json:"identifier"`
+		} `json:"industryIdentifiers"`
+	} `json:"volumeInfo"`
+}
+
+type googleBooksResponse struct {
+	Items []googleBooksVolume `json:"items"`
+}
+
+func stripHTML(value string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range value {
+		switch {
+		case r == '<':
+			inTag = true
+			b.WriteByte(' ')
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+func limitRunes(text string, limit int) (string, bool) {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes), false
+	}
+	if limit < 1 {
+		return "", true
+	}
+	return strings.TrimSpace(string(runes[:limit])), true
+}
+
+// withISBN keeps the ISBN on the description and stays inside the item field limit.
+func withISBN(body string, isbn13 string) string {
+	note := "ISBN " + isbn13
+	body = strings.TrimSpace(stripHTML(body))
+	if body == "" {
+		return note
+	}
+	if strings.Contains(body, isbn13) {
+		text, cut := limitRunes(body, barcodeDescriptionLimit)
+		if cut && len([]rune(text)) > 0 {
+			text, _ = limitRunes(text, barcodeDescriptionLimit-1)
+			return text + "…"
+		}
+		return text
+	}
+
+	suffix := " | " + note
+	room := barcodeDescriptionLimit - len([]rune(suffix))
+	text, cut := limitRunes(body, room)
+	if cut && room > 1 {
+		text, _ = limitRunes(body, room-1)
+		text += "…"
+	}
+	if text == "" {
+		return note
+	}
+	return text + suffix
+}
+
+func isAllowedGoogleBooksImageHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == googleBooksImageHost || host == "books.googleusercontent.com" || strings.HasSuffix(host, ".googleusercontent.com")
+}
+
+func normalizeGoogleBooksImageURL(imageURL string) string {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return ""
+	}
+
+	u, err := url.Parse(imageURL)
+	if err != nil || u.Hostname() == "" || u.User != nil {
+		return ""
+	}
+
+	switch u.Scheme {
+	case "http":
+		u.Scheme = schemeHTTPS
+	case schemeHTTPS:
+	default:
+		return ""
+	}
+
+	if !isAllowedGoogleBooksImageHost(u.Hostname()) {
+		return ""
+	}
+
+	query := u.Query()
+	switch query.Get("zoom") {
+	case "1", "5":
+		query.Set("zoom", "3")
+		u.RawQuery = query.Encode()
+	}
+
+	return u.String()
+}
+
+func googleBooksCoverURL(info googleBooksVolume) string {
+	links := info.VolumeInfo.ImageLinks
+	return normalizeGoogleBooksImageURL(firstNonEmpty(
+		links.ExtraLarge,
+		links.Large,
+		links.Medium,
+		links.Small,
+		links.Thumbnail,
+		links.SmallThumbnail,
+	))
+}
+
+func buildGoogleBooksBarcodeProduct(isbn13 string, volume googleBooksVolume) (repo.BarcodeProduct, bool) {
+	info := volume.VolumeInfo
+	title := strings.TrimSpace(info.Title)
+	if title == "" {
+		return repo.BarcodeProduct{}, false
+	}
+	subtitle := strings.TrimSpace(info.Subtitle)
+	if subtitle != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(subtitle)) {
+		title += ": " + subtitle
+	}
+
+	authors := make([]string, 0, len(info.Authors))
+	for _, author := range info.Authors {
+		author = strings.TrimSpace(author)
+		if author != "" {
+			authors = append(authors, author)
+		}
+	}
+
+	var body string
+	if description := strings.TrimSpace(info.Description); description != "" {
+		body = description
+	} else {
+		parts := make([]string, 0, 3)
+		if publisher := strings.TrimSpace(info.Publisher); publisher != "" {
+			parts = append(parts, publisher)
+		}
+		if date := strings.TrimSpace(info.PublishedDate); date != "" {
+			parts = append(parts, date)
+		}
+		if info.PageCount > 0 {
+			parts = append(parts, fmt.Sprintf("%d pages", info.PageCount))
+		}
+		body = strings.Join(parts, " | ")
+	}
+
+	var p repo.BarcodeProduct
+	p.Barcode = isbn13
+	p.SearchEngineName = googleBooksImageHost
+	p.Item.Name = title
+	p.Manufacturer = strings.Join(authors, ", ")
+	p.Item.Description = withISBN(body, isbn13)
+	p.ImageURL = googleBooksCoverURL(volume)
+
+	return p, true
+}
+
+func selectGoogleBooksVolume(items []googleBooksVolume, isbn13 string) (googleBooksVolume, bool) {
+	var fallback *googleBooksVolume
+	for i := range items {
+		if strings.TrimSpace(items[i].VolumeInfo.Title) == "" {
+			continue
+		}
+		if fallback == nil {
+			fallback = &items[i]
+		}
+		for _, id := range items[i].VolumeInfo.IndustryIdentifiers {
+			if compactBarcode(id.Identifier) == isbn13 {
+				return items[i], true
+			}
+		}
+	}
+	if fallback == nil {
+		return googleBooksVolume{}, false
+	}
+	return *fallback, true
+}
+
+func lookupGoogleBooks(isbn13 string) ([]repo.BarcodeProduct, error) {
+	query := url.Values{}
+	query.Set("q", "isbn:"+isbn13)
+	query.Set("printType", "books")
+	query.Set("maxResults", "5")
+
+	req, err := http.NewRequest(http.MethodGet, "https://www.googleapis.com/books/v1/volumes?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Homebox/1.0 (https://github.com/sysadminsmedia/homebox)")
+
+	resp, err := barcodeHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return nil, nil
+	case http.StatusTooManyRequests, http.StatusForbidden:
+		log.Warn().Msg("google books lookup unavailable: " + resp.Status)
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("books.google.com API returned status code: %d", resp.StatusCode)
+	}
+
+	var result googleBooksResponse
+	if err := decodeBarcodeResponse(resp.Body, &result); err != nil {
+		log.Error().Msg("Can not unmarshal books.google.com JSON")
+		return nil, err
+	}
+
+	volume, ok := selectGoogleBooksVolume(result.Items, isbn13)
+	if !ok {
+		return nil, nil
+	}
+	product, ok := buildGoogleBooksBarcodeProduct(isbn13, volume)
+	if !ok {
+		return nil, nil
+	}
+	return []repo.BarcodeProduct{product}, nil
+}
+
 // fetchImageBase64 fetches an image from the given HTTPS URL and returns it as a base64-encoded data URI.
 func fetchImageBase64(imageURL string) (string, error) {
 	res, err := barcodeHTTPClient.Get(imageURL)
@@ -706,7 +962,7 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 		allowSlowResponse(w, r)
 
 		// Spaces and dashes are ignored. An ISBN-10 is searched as its ISBN-13
-		// so every provider sees one code, and Open Library is only asked for
+		// so every provider sees one code. Book databases are only asked for
 		// real ISBNs.
 		searchCode := compactBarcode(q.EAN)
 		isbn13, isISBN := canonicalISBN13(searchCode)
@@ -748,12 +1004,20 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 		}
 
 		if isISBN {
-			lookups = append(lookups, lookup{
-				name: "openlibrary.org",
-				run: func() ([]repo.BarcodeProduct, error) {
-					return lookupOpenLibrary(conf.OpenFoodFactsContact, isbn13)
+			lookups = append(lookups,
+				lookup{
+					name: "openlibrary.org",
+					run: func() ([]repo.BarcodeProduct, error) {
+						return lookupOpenLibrary(conf.OpenFoodFactsContact, isbn13)
+					},
 				},
-			})
+				lookup{
+					name: googleBooksImageHost,
+					run: func() ([]repo.BarcodeProduct, error) {
+						return lookupGoogleBooks(isbn13)
+					},
+				},
+			)
 		}
 
 		results := make([][]repo.BarcodeProduct, len(lookups))
@@ -784,19 +1048,42 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 				continue
 			}
 
-			// Validate URL is HTTPS
+			// Validate URL is HTTPS. A failed fetch clears the URL so the create
+			// form does not attach an empty photo.
 			u, err := url.Parse(p.ImageURL)
 			if err != nil || u.Scheme != schemeHTTPS {
 				log.Warn().Msg("Skipping non-HTTPS image URL: " + p.ImageURL)
+				p.ImageURL = ""
 				continue
 			}
 
 			base64Img, err := fetchImageBase64(p.ImageURL)
 			if err != nil {
 				log.Warn().Msg("Cannot fetch image for URL: " + p.ImageURL + ": " + err.Error())
+				p.ImageURL = ""
 				continue
 			}
 			p.ImageBase64 = base64Img
+		}
+
+		// One source often has the edition and another has the cover. Share a
+		// fetched cover with the other rows for the same ISBN.
+		coverByBarcode := make(map[string]int, len(products))
+		for i := range products {
+			if products[i].Barcode != "" && products[i].ImageBase64 != "" {
+				coverByBarcode[products[i].Barcode] = i
+			}
+		}
+		for i := range products {
+			if products[i].ImageBase64 != "" || products[i].Barcode == "" {
+				continue
+			}
+			src, ok := coverByBarcode[products[i].Barcode]
+			if !ok {
+				continue
+			}
+			products[i].ImageURL = products[src].ImageURL
+			products[i].ImageBase64 = products[src].ImageBase64
 		}
 
 		if len(products) != 0 {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -450,5 +451,148 @@ func TestBarcodeSearchIncludesOpenLibraryForISBN(t *testing.T) {
 	}
 	if products[0].Barcode != "9780306406157" {
 		t.Fatalf("expected canonical ISBN, got %s", products[0].Barcode)
+	}
+}
+
+func TestBuildGoogleBooksBarcodeProduct(t *testing.T) {
+	var volume googleBooksVolume
+	if err := json.Unmarshal([]byte(`{
+		"volumeInfo": {
+			"title": "Kraftwerk",
+			"subtitle": "Future Music from Germany",
+			"authors": ["Uwe Schütte"],
+			"publisher": "Penguin Books",
+			"publishedDate": "2020",
+			"description": "A <b>history</b> of Kraftwerk.",
+			"pageCount": 316,
+			"imageLinks": {
+				"thumbnail": "http://books.google.com/books/content?id=abc&printsec=frontcover&img=1&zoom=1"
+			},
+			"industryIdentifiers": [{"type": "ISBN_13", "identifier": "9781802060980"}]
+		}
+	}`), &volume); err != nil {
+		t.Fatalf("unmarshal volume: %v", err)
+	}
+
+	product, ok := buildGoogleBooksBarcodeProduct("9781802060980", volume)
+	if !ok {
+		t.Fatal("expected product to be built")
+	}
+	if product.Item.Name != "Kraftwerk: Future Music from Germany" {
+		t.Fatalf("unexpected title: %s", product.Item.Name)
+	}
+	if product.Manufacturer != "Uwe Schütte" {
+		t.Fatalf("unexpected author: %s", product.Manufacturer)
+	}
+	if product.Item.Description != "A history of Kraftwerk. | ISBN 9781802060980" {
+		t.Fatalf("unexpected description: %s", product.Item.Description)
+	}
+	if product.SearchEngineName != "books.google.com" {
+		t.Fatalf("unexpected source: %s", product.SearchEngineName)
+	}
+
+	imageURL, err := url.Parse(product.ImageURL)
+	if err != nil {
+		t.Fatalf("parse cover: %v", err)
+	}
+	if imageURL.Scheme != "https" || imageURL.Host != "books.google.com" || imageURL.Query().Get("zoom") != "3" {
+		t.Fatalf("unexpected cover: %s", product.ImageURL)
+	}
+}
+
+func TestBuildGoogleBooksBarcodeProductRejectsUntrustedImage(t *testing.T) {
+	volume := googleBooksVolume{}
+	volume.VolumeInfo.Title = "Kraftwerk"
+	volume.VolumeInfo.ImageLinks.Thumbnail = "https://example.com/cover.jpg"
+	product, ok := buildGoogleBooksBarcodeProduct("9781802060980", volume)
+	if !ok {
+		t.Fatal("expected product to be built")
+	}
+	if product.ImageURL != "" {
+		t.Fatalf("expected untrusted cover to be cleared, got %s", product.ImageURL)
+	}
+}
+
+func TestWithISBNKeepsTheNumberInsideTheDescriptionLimit(t *testing.T) {
+	body := strings.Repeat("word ", 400)
+	got := withISBN(body, "9781802060980")
+	if len([]rune(got)) > barcodeDescriptionLimit {
+		t.Fatalf("description length %d exceeds %d", len([]rune(got)), barcodeDescriptionLimit)
+	}
+	if !strings.HasSuffix(got, "ISBN 9781802060980") {
+		t.Fatalf("description lost the ISBN: %s", got[len(got)-40:])
+	}
+}
+
+func TestBarcodeSearchUsesGoogleBooksWhenOpenLibraryMisses(t *testing.T) {
+	originalClient := barcodeHTTPClient
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9")
+	barcodeHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusNotFound
+		body := ""
+		header := make(http.Header)
+
+		switch r.URL.Host {
+		case "openlibrary.org":
+			status = http.StatusOK
+			body = `{}`
+		case "www.googleapis.com":
+			if r.URL.Query().Get("q") != "isbn:9781802060980" {
+				t.Errorf("unexpected google query %q", r.URL.Query().Get("q"))
+			}
+			status = http.StatusOK
+			body = `{
+				"items": [{
+					"volumeInfo": {
+						"title": "Kraftwerk",
+						"subtitle": "Future Music from Germany",
+						"authors": ["Uwe Schütte"],
+						"publisher": "Penguin Books",
+						"publishedDate": "2020",
+						"pageCount": 316,
+						"imageLinks": {
+							"thumbnail": "https://books.google.com/books/content?id=abc&zoom=1"
+						},
+						"industryIdentifiers": [{"type": "ISBN_13", "identifier": "978-1-80206-098-0"}]
+					}
+				}]
+			}`
+		case "books.google.com":
+			status = http.StatusOK
+			header.Set("Content-Type", "image/jpeg")
+			body = string(jpeg)
+		}
+
+		return &http.Response{
+			StatusCode: status,
+			Header:     header,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+	t.Cleanup(func() { barcodeHTTPClient = originalClient })
+
+	handler := (&V1Controller{}).HandleProductSearchFromBarcode(config.BarcodeAPIConf{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?productEAN=9781802060980", nil)
+	if err := handler(recorder, request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", recorder.Code, recorder.Body.String())
+	}
+
+	var products []repo.BarcodeProduct
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(products) != 1 || products[0].SearchEngineName != "books.google.com" {
+		t.Fatalf("unexpected products: %+v", products)
+	}
+	if products[0].Item.Name != "Kraftwerk: Future Music from Germany" || products[0].Manufacturer != "Uwe Schütte" {
+		t.Fatalf("unexpected book: %+v", products[0])
+	}
+	if products[0].ImageBase64 == "" {
+		t.Fatal("expected the Google Books cover to be attached")
 	}
 }
