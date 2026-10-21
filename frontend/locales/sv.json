@@ -947,6 +947,17 @@
         "title": "AR-skanner",
         "unsupported": "AR-skanning stöds inte i denna webbläsare"
     },
+    "scanner_xray": {
+        "looking_up": "Hämtar…",
+        "mode": "Röntgen",
+        "next_image": "Nästa bild",
+        "no_photo": "Ingen bild",
+        "open": "Öppna",
+        "point_at_code": "Rikta kameran mot en Homebox-QR-kod",
+        "previous_image": "Föregående bild",
+        "several_items": "{count} objekt",
+        "title": "Röntgen"
+    },
     "tags": {
         "no_results": "Inga taggar hittades",
         "tag_delete_confirm": "Är du säker på att du vill ta bort denna tagg? Denna åtgärd kan inte ångras.",

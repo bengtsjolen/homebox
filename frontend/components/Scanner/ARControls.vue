@@ -21,6 +21,9 @@
 
     <!-- Bottom bar -->
     <div class="pointer-events-auto flex items-center justify-center gap-4 bg-background/60 p-3 backdrop-blur-sm">
+      <Button variant="outline" size="sm" @click="navigateTo('/scanner-xray')">
+        {{ t("scanner_xray.mode") }}
+      </Button>
       <Button variant="outline" size="sm" @click="$emit('switchCamera')">
         <MdiCameraFlip class="mr-1.5 size-4" />
         {{ t("scanner_ar.switch_camera") }}

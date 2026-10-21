@@ -49,6 +49,10 @@
             <MdiCameraOutline class="mr-2" />
             {{ t("scanner_ar.ar_mode") }}
           </Button>
+          <Button variant="outline" class="w-full" @click="openXRayMode">
+            <MdiImageSearchOutline class="mr-2" />
+            {{ t("scanner_xray.mode") }}
+          </Button>
         </div>
       </div>
     </DialogScrollContent>
@@ -66,6 +70,7 @@
   import MdiBarcode from "~icons/mdi/barcode";
   import MdiAlertCircleOutline from "~icons/mdi/alert-circle-outline";
   import MdiCameraOutline from "~icons/mdi/camera-outline";
+  import MdiImageSearchOutline from "~icons/mdi/image-search-outline";
   import { useDialog } from "@/components/ui/dialog-provider";
 
   const { t } = useI18n();
@@ -95,6 +100,11 @@
   const openArMode = () => {
     closeDialog(DialogID.Scanner);
     navigateTo("/scanner-ar");
+  };
+
+  const openXRayMode = () => {
+    closeDialog(DialogID.Scanner);
+    navigateTo("/scanner-xray");
   };
 
   const startScanner = async () => {
