@@ -9,6 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func Test_BarcodeGoogleBooksKeyFromEnv(t *testing.T) {
+	t.Setenv("HBOXTEST_BARCODE_TOKEN_GOOGLE_BOOKS", "from-env")
+
+	var cfg Config
+	_, err := conf.Parse("HBOXTEST", &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", cfg.Barcode.TokenGoogleBooks)
+}
+
 func Test_SearchConf_Defaults(t *testing.T) {
 	var cfg Config
 	_, err := conf.Parse("HBOXTEST", &cfg)

@@ -92,12 +92,13 @@ func Test_Storage_RedactsConnStringUserinfo(t *testing.T) {
 }
 
 func Test_BarcodeAPIConf_RedactsToken(t *testing.T) {
-	c := BarcodeAPIConf{TokenBarcodespider: "token-xyz", OpenFoodFactsContact: "contact@example.com"}
+	c := BarcodeAPIConf{TokenBarcodespider: "token-xyz", TokenGoogleBooks: "google-key", OpenFoodFactsContact: "contact@example.com"}
 
 	out, err := json.Marshal(c)
 	require.NoError(t, err)
 
 	assert.NotContains(t, string(out), "token-xyz")
+	assert.NotContains(t, string(out), "google-key")
 	assert.Contains(t, string(out), "contact@example.com")
 	assert.Contains(t, string(out), sentinel)
 }
@@ -122,7 +123,7 @@ func Test_Config_FullMarshalRedactsAllSecrets(t *testing.T) {
 			Password:         "db-secret",
 			PubSubConnString: "postgres://u:pubsecret@h/d",
 		},
-		Barcode: BarcodeAPIConf{TokenBarcodespider: "bs-secret"},
+		Barcode: BarcodeAPIConf{TokenBarcodespider: "bs-secret", TokenGoogleBooks: "google-secret"},
 		Otel:    OTelConfig{Headers: "Authorization=Bearer otel-secret"},
 	}
 
@@ -137,6 +138,7 @@ func Test_Config_FullMarshalRedactsAllSecrets(t *testing.T) {
 		"db-secret",
 		"pubsecret",
 		"bs-secret",
+		"google-secret",
 		"otel-secret",
 	} {
 		assert.NotContainsf(t, string(out), secret, "expected %q to be redacted in output", secret)

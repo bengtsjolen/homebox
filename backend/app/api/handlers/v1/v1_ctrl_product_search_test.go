@@ -513,6 +513,138 @@ func TestBuildGoogleBooksBarcodeProductRejectsUntrustedImage(t *testing.T) {
 	}
 }
 
+func TestGoogleBooksSiblingCoverUsesSameYearEdition(t *testing.T) {
+	source := googleBooksVolume{}
+	source.VolumeInfo.Title = "Kraftwerk"
+	source.VolumeInfo.Subtitle = "Future Music from Germany"
+	source.VolumeInfo.Authors = []string{"Uwe Schütte"}
+	source.VolumeInfo.PublishedDate = "2020"
+	source.VolumeInfo.IndustryIdentifiers = []struct {
+		Type       string `json:"type"`
+		Identifier string `json:"identifier"`
+	}{{Type: "ISBN_13", Identifier: "9781802060980"}}
+
+	otherYear := googleBooksVolume{}
+	otherYear.VolumeInfo.Title = "Kraftwerk: Future Music from Germany"
+	otherYear.VolumeInfo.Authors = []string{"Schütte, Uwe"}
+	otherYear.VolumeInfo.PublishedDate = "2017"
+	otherYear.VolumeInfo.ImageLinks.Thumbnail = "https://books.google.com/books/content?id=old&zoom=1"
+
+	sameYear := googleBooksVolume{}
+	sameYear.VolumeInfo.Title = "Kraftwerk: Future Music from Germany"
+	sameYear.VolumeInfo.Authors = []string{"Uwe Schütte"}
+	sameYear.VolumeInfo.PublishedDate = "2020-03"
+	sameYear.VolumeInfo.IndustryIdentifiers = []struct {
+		Type       string `json:"type"`
+		Identifier string `json:"identifier"`
+	}{{Type: "ISBN_13", Identifier: "9780141986753"}}
+	sameYear.VolumeInfo.ImageLinks.Thumbnail = "https://books.google.com/books/content?id=same&zoom=1"
+
+	cover := googleBooksSiblingCover("9781802060980", source, []googleBooksVolume{source, otherYear, sameYear})
+	if !strings.Contains(cover, "id=same") {
+		t.Fatalf("expected the 2020 edition cover, got %s", cover)
+	}
+}
+
+func TestBarcodeSearchUsesGoogleBooksKeyAndSiblingCover(t *testing.T) {
+	originalClient := barcodeHTTPClient
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9")
+	barcodeHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "www.googleapis.com" && r.URL.Host != "books.google.com" {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    r,
+			}, nil
+		}
+		if r.URL.Host == "books.google.com" {
+			header := make(http.Header)
+			header.Set("Content-Type", "image/jpeg")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     header,
+				Body:       io.NopCloser(strings.NewReader(string(jpeg))),
+				Request:    r,
+			}, nil
+		}
+		if r.URL.Query().Get("key") != "test-key" {
+			t.Errorf("expected API key, got %q", r.URL.Query().Get("key"))
+		}
+
+		body := ""
+		switch r.URL.Query().Get("q") {
+		case "isbn:9781802060980":
+			body = `{
+				"items": [{
+					"volumeInfo": {
+						"title": "Kraftwerk",
+						"subtitle": "Future Music from Germany",
+						"authors": ["Uwe Schütte"],
+						"publishedDate": "2020",
+						"industryIdentifiers": [{"type": "ISBN_13", "identifier": "9781802060980"}]
+					}
+				}]
+			}`
+		default:
+			if !strings.Contains(r.URL.Query().Get("q"), "intitle:Kraftwerk") {
+				t.Errorf("unexpected related query %q", r.URL.Query().Get("q"))
+			}
+			body = `{
+				"items": [{
+					"volumeInfo": {
+						"title": "Kraftwerk: Future Music from Germany",
+						"authors": ["Uwe Schütte"],
+						"publishedDate": "2020",
+						"imageLinks": {"thumbnail": "https://books.google.com/books/content?id=same&zoom=1"},
+						"industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780141986753"}]
+					}
+				}]
+			}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+	t.Cleanup(func() { barcodeHTTPClient = originalClient })
+
+	handler := (&V1Controller{}).HandleProductSearchFromBarcode(config.BarcodeAPIConf{
+		TokenGoogleBooks: "test-key",
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?productEAN=9781802060980", nil)
+	if err := handler(recorder, request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", recorder.Code, recorder.Body.String())
+	}
+
+	var products []repo.BarcodeProduct
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var google *repo.BarcodeProduct
+	for i := range products {
+		if products[i].SearchEngineName == "books.google.com" {
+			google = &products[i]
+		}
+	}
+	if google == nil {
+		t.Fatalf("google books result missing: %+v", products)
+	}
+	if google.ImageBase64 == "" {
+		t.Fatal("expected the sibling edition cover")
+	}
+	if google.Item.Name != "Kraftwerk: Future Music from Germany" {
+		t.Fatalf("unexpected title: %s", google.Item.Name)
+	}
+}
+
 func TestWithISBNKeepsTheNumberInsideTheDescriptionLimit(t *testing.T) {
 	body := strings.Repeat("word ", 400)
 	got := withISBN(body, "9781802060980")
@@ -594,5 +726,91 @@ func TestBarcodeSearchUsesGoogleBooksWhenOpenLibraryMisses(t *testing.T) {
 	}
 	if products[0].ImageBase64 == "" {
 		t.Fatal("expected the Google Books cover to be attached")
+	}
+}
+
+func TestBuildDNBBarcodeProductFromSRU(t *testing.T) {
+	record, records, err := parseDNBSRU([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse>
+  <numberOfRecords>1</numberOfRecords>
+  <records><record><recordData><dc>
+    <title>Kraftwerk : future music from Germany / Uwe Schütte</title>
+    <creator>Schütte, Uwe [Verfasser]</creator>
+    <publisher>London : Penguin Books</publisher>
+    <date>2020</date>
+    <identifier>978-1-80206-098-0</identifier>
+    <format>xv, 316 pages :</format>
+  </dc></recordData></record></records>
+</searchRetrieveResponse>`))
+	if err != nil {
+		t.Fatalf("parse SRU: %v", err)
+	}
+	if records != 1 {
+		t.Fatalf("expected one record, got %d", records)
+	}
+
+	product, ok := buildDNBBarcodeProduct("9781802060980", record)
+	if !ok {
+		t.Fatal("expected product to be built")
+	}
+	if product.Item.Name != "Kraftwerk: future music from Germany" {
+		t.Fatalf("unexpected title: %s", product.Item.Name)
+	}
+	if product.Manufacturer != "Uwe Schütte" {
+		t.Fatalf("unexpected author: %s", product.Manufacturer)
+	}
+	if product.SearchEngineName != "www.dnb.de" {
+		t.Fatalf("unexpected source: %s", product.SearchEngineName)
+	}
+	if product.Item.Description != "London : Penguin Books | 2020 | 316 pages | ISBN 9781802060980" {
+		t.Fatalf("unexpected description: %s", product.Item.Description)
+	}
+}
+
+func TestBarcodeSearchUsesDNBWhenOtherBookSourcesMiss(t *testing.T) {
+	originalClient := barcodeHTTPClient
+	barcodeHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusNotFound
+		body := ""
+		if r.URL.Host == "services.dnb.de" {
+			if !strings.Contains(r.URL.Query().Get("query"), "isbn=9781802060980") {
+				t.Errorf("unexpected dnb query %q", r.URL.Query().Get("query"))
+			}
+			status = http.StatusOK
+			body = `<searchRetrieveResponse><numberOfRecords>1</numberOfRecords><records><record><recordData><dc>
+				<title>Kraftwerk : future music from Germany / Uwe Schütte</title>
+				<creator>Schütte, Uwe [Verfasser]</creator>
+				<publisher>London : Penguin Books</publisher>
+				<date>2020</date>
+			</dc></recordData></record></records></searchRetrieveResponse>`
+		}
+		return &http.Response{
+			StatusCode: status,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+	t.Cleanup(func() { barcodeHTTPClient = originalClient })
+
+	handler := (&V1Controller{}).HandleProductSearchFromBarcode(config.BarcodeAPIConf{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?productEAN=9781802060980", nil)
+	if err := handler(recorder, request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", recorder.Code, recorder.Body.String())
+	}
+
+	var products []repo.BarcodeProduct
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(products) != 1 || products[0].SearchEngineName != "www.dnb.de" {
+		t.Fatalf("unexpected products: %+v", products)
+	}
+	if products[0].Item.Name != "Kraftwerk: future music from Germany" || products[0].Manufacturer != "Uwe Schütte" {
+		t.Fatalf("unexpected book: %+v", products[0])
 	}
 }

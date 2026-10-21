@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -842,11 +844,112 @@ func selectGoogleBooksVolume(items []googleBooksVolume, isbn13 string) (googleBo
 	return *fallback, true
 }
 
-func lookupGoogleBooks(isbn13 string) ([]repo.BarcodeProduct, error) {
+func bookTitleKey(title string, subtitle string) string {
+	full := strings.TrimSpace(title)
+	if subtitle = strings.TrimSpace(subtitle); subtitle != "" && !strings.Contains(strings.ToLower(full), strings.ToLower(subtitle)) {
+		full += " " + subtitle
+	}
+
+	var b strings.Builder
+	for _, r := range strings.ToLower(full) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func authorsOverlap(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return len(left) == 0 && len(right) == 0
+	}
+
+	tokens := make(map[string]struct{})
+	for _, name := range left {
+		for _, part := range strings.Fields(strings.ToLower(name)) {
+			part = strings.Trim(part, ",.;")
+			if len([]rune(part)) >= 3 {
+				tokens[part] = struct{}{}
+			}
+		}
+	}
+	for _, name := range right {
+		for _, part := range strings.Fields(strings.ToLower(name)) {
+			part = strings.Trim(part, ",.;")
+			if _, ok := tokens[part]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func googleVolumeHasISBN(volume googleBooksVolume, isbn13 string) bool {
+	for _, id := range volume.VolumeInfo.IndustryIdentifiers {
+		if compactBarcode(id.Identifier) == isbn13 {
+			return true
+		}
+	}
+	return false
+}
+
+// googleBooksSiblingCover returns a cover from another edition of the same book.
+// The exact ISBN often has no image while another printing from the same year does.
+func googleBooksSiblingCover(isbn13 string, source googleBooksVolume, candidates []googleBooksVolume) string {
+	want := bookTitleKey(source.VolumeInfo.Title, source.VolumeInfo.Subtitle)
+	if want == "" {
+		return ""
+	}
+
+	year := ""
+	if len(source.VolumeInfo.PublishedDate) >= 4 {
+		year = source.VolumeInfo.PublishedDate[:4]
+	}
+
+	var fallback string
+	for _, candidate := range candidates {
+		if googleVolumeHasISBN(candidate, isbn13) {
+			continue
+		}
+		if bookTitleKey(candidate.VolumeInfo.Title, candidate.VolumeInfo.Subtitle) != want {
+			continue
+		}
+		if !authorsOverlap(source.VolumeInfo.Authors, candidate.VolumeInfo.Authors) {
+			continue
+		}
+		cover := googleBooksCoverURL(candidate)
+		if cover == "" {
+			continue
+		}
+		if year != "" && strings.HasPrefix(candidate.VolumeInfo.PublishedDate, year) {
+			return cover
+		}
+		if fallback == "" {
+			fallback = cover
+		}
+	}
+	return fallback
+}
+
+func googleQueryTerm(prefix string, value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, `"`, ""))
+	if value == "" {
+		return ""
+	}
+	if strings.ContainsAny(value, " \t") {
+		return prefix + `"` + value + `"`
+	}
+	return prefix + value
+}
+
+func fetchGoogleBooksVolumes(apiKey string, queryText string) ([]googleBooksVolume, error) {
 	query := url.Values{}
-	query.Set("q", "isbn:"+isbn13)
+	query.Set("q", queryText)
 	query.Set("printType", "books")
 	query.Set("maxResults", "5")
+	if strings.TrimSpace(apiKey) != "" {
+		query.Set("key", strings.TrimSpace(apiKey))
+	}
 
 	req, err := http.NewRequest(http.MethodGet, "https://www.googleapis.com/books/v1/volumes?"+query.Encode(), nil)
 	if err != nil {
@@ -866,7 +969,7 @@ func lookupGoogleBooks(isbn13 string) ([]repo.BarcodeProduct, error) {
 	case http.StatusNotFound:
 		return nil, nil
 	case http.StatusTooManyRequests, http.StatusForbidden:
-		log.Warn().Msg("google books lookup unavailable: " + resp.Status)
+		log.Warn().Msg("google books lookup unavailable (set HBOX_BARCODE_TOKEN_GOOGLE_BOOKS): " + resp.Status)
 		return nil, nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -878,12 +981,232 @@ func lookupGoogleBooks(isbn13 string) ([]repo.BarcodeProduct, error) {
 		log.Error().Msg("Can not unmarshal books.google.com JSON")
 		return nil, err
 	}
+	return result.Items, nil
+}
 
-	volume, ok := selectGoogleBooksVolume(result.Items, isbn13)
+func lookupGoogleBooks(apiKey string, isbn13 string) ([]repo.BarcodeProduct, error) {
+	items, err := fetchGoogleBooksVolumes(apiKey, "isbn:"+isbn13)
+	if err != nil || len(items) == 0 {
+		return nil, err
+	}
+
+	volume, ok := selectGoogleBooksVolume(items, isbn13)
 	if !ok {
 		return nil, nil
 	}
 	product, ok := buildGoogleBooksBarcodeProduct(isbn13, volume)
+	if !ok {
+		return nil, nil
+	}
+	if product.ImageURL == "" {
+		product.ImageURL = googleBooksSiblingCover(isbn13, volume, items)
+	}
+	if product.ImageURL == "" && strings.TrimSpace(apiKey) != "" {
+		query := googleQueryTerm("intitle:", volume.VolumeInfo.Title)
+		if len(volume.VolumeInfo.Authors) > 0 {
+			if author := googleQueryTerm("inauthor:", volume.VolumeInfo.Authors[0]); author != "" {
+				query = strings.TrimSpace(query + " " + author)
+			}
+		}
+		related, err := fetchGoogleBooksVolumes(apiKey, query)
+		if err != nil {
+			log.Warn().Msg("google books edition search failed: " + err.Error())
+		} else if cover := googleBooksSiblingCover(isbn13, volume, related); cover != "" {
+			product.ImageURL = cover
+		}
+	}
+	return []repo.BarcodeProduct{product}, nil
+}
+
+const dnbSearchEngineName = "www.dnb.de"
+
+var (
+	catalogRolePattern = regexp.MustCompile(`\s*\[[^\]]*\]`)
+	catalogPagePattern = regexp.MustCompile(`(\d+)\s+pages`)
+)
+
+type dnbRecord struct {
+	titles     []string
+	creators   []string
+	publishers []string
+	dates      []string
+	formats    []string
+}
+
+// parseDNBSRU reads a Deutsche Nationalbibliothek SRU response in oai_dc.
+func parseDNBSRU(data []byte) (dnbRecord, int, error) {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var record dnbRecord
+	var records int
+	var current string
+	var capture bool
+	var buf strings.Builder
+
+	flush := func() {
+		text := strings.TrimSpace(buf.String())
+		buf.Reset()
+		if text == "" || !capture {
+			return
+		}
+		switch current {
+		case "title":
+			record.titles = append(record.titles, text)
+		case "creator":
+			record.creators = append(record.creators, text)
+		case "publisher":
+			record.publishers = append(record.publishers, text)
+		case "date":
+			record.dates = append(record.dates, text)
+		case "format":
+			record.formats = append(record.formats, text)
+		case "numberOfRecords":
+			parsed, err := strconv.Atoi(text)
+			if err == nil {
+				records = parsed
+			}
+		}
+	}
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			flush()
+			return record, records, nil
+		}
+		if err != nil {
+			return record, records, err
+		}
+		switch el := tok.(type) {
+		case xml.StartElement:
+			flush()
+			current = el.Name.Local
+			switch current {
+			case "title", "creator", "publisher", "date", "format", "numberOfRecords":
+				capture = true
+			default:
+				capture = false
+			}
+		case xml.CharData:
+			if capture {
+				buf.Write(el)
+			}
+		case xml.EndElement:
+			flush()
+			current = ""
+			capture = false
+		}
+	}
+}
+
+func catalogPersonName(raw string) string {
+	raw = strings.TrimSpace(catalogRolePattern.ReplaceAllString(raw, ""))
+	last, first, ok := strings.Cut(raw, ",")
+	if !ok {
+		return raw
+	}
+	last = strings.TrimSpace(last)
+	first = strings.TrimSpace(first)
+	if last == "" || first == "" {
+		return raw
+	}
+	return first + " " + last
+}
+
+func catalogTitle(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if statement, _, ok := strings.Cut(raw, " / "); ok && strings.TrimSpace(statement) != "" {
+		raw = strings.TrimSpace(statement)
+	}
+	return strings.ReplaceAll(raw, " : ", ": ")
+}
+
+func buildDNBBarcodeProduct(isbn13 string, record dnbRecord) (repo.BarcodeProduct, bool) {
+	if len(record.titles) == 0 {
+		return repo.BarcodeProduct{}, false
+	}
+	title := catalogTitle(record.titles[0])
+	if title == "" {
+		return repo.BarcodeProduct{}, false
+	}
+
+	authors := make([]string, 0, len(record.creators))
+	for _, creator := range record.creators {
+		name := catalogPersonName(creator)
+		if name != "" {
+			authors = append(authors, name)
+		}
+	}
+
+	parts := make([]string, 0, 3)
+	if len(record.publishers) > 0 {
+		if publisher := strings.TrimSpace(record.publishers[0]); publisher != "" {
+			parts = append(parts, publisher)
+		}
+	}
+	if len(record.dates) > 0 {
+		if date := strings.TrimSpace(record.dates[0]); date != "" {
+			parts = append(parts, date)
+		}
+	}
+	for _, format := range record.formats {
+		match := catalogPagePattern.FindStringSubmatch(format)
+		if len(match) == 2 {
+			parts = append(parts, match[1]+" pages")
+			break
+		}
+	}
+
+	var p repo.BarcodeProduct
+	p.Barcode = isbn13
+	p.SearchEngineName = dnbSearchEngineName
+	p.Item.Name = title
+	p.Manufacturer = strings.Join(authors, ", ")
+	p.Item.Description = withISBN(strings.Join(parts, " | "), isbn13)
+	return p, true
+}
+
+func lookupDNB(isbn13 string) ([]repo.BarcodeProduct, error) {
+	query := url.Values{}
+	query.Set("version", "1.1")
+	query.Set("operation", "searchRetrieve")
+	query.Set("query", "isbn="+isbn13)
+	query.Set("maximumRecords", "1")
+	query.Set("recordSchema", "oai_dc")
+
+	req, err := http.NewRequest(http.MethodGet, "https://services.dnb.de/sru/dnb?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Homebox/1.0 (https://github.com/sysadminsmedia/homebox)")
+
+	resp, err := barcodeHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("dnb.de API returned status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, barcodeMaxResponseBytes))
+	if err != nil {
+		return nil, err
+	}
+	record, records, err := parseDNBSRU(body)
+	if err != nil {
+		log.Error().Msg("Can not read dnb.de response")
+		return nil, err
+	}
+	if records == 0 {
+		return nil, nil
+	}
+	product, ok := buildDNBBarcodeProduct(isbn13, record)
 	if !ok {
 		return nil, nil
 	}
@@ -1014,7 +1337,13 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 				lookup{
 					name: googleBooksImageHost,
 					run: func() ([]repo.BarcodeProduct, error) {
-						return lookupGoogleBooks(isbn13)
+						return lookupGoogleBooks(conf.TokenGoogleBooks, isbn13)
+					},
+				},
+				lookup{
+					name: dnbSearchEngineName,
+					run: func() ([]repo.BarcodeProduct, error) {
+						return lookupDNB(isbn13)
 					},
 				},
 			)
