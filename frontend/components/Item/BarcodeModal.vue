@@ -105,6 +105,9 @@
       </BaseCard>
 
       <DialogFooter>
+        <Button v-if="canCreateUnknown" type="button" variant="outline" @click="createUnknownItem">
+          {{ $t("components.item.product_import.create_unknown") }}
+        </Button>
         <Button type="button" :disabled="selectedRow === -1" @click="createItem">
           {{ $t("components.item.product_import.import_selected") }}
         </Button>
@@ -132,10 +135,19 @@
   const { t } = useI18n();
 
   const searching = ref(false);
+  const lookupFinished = ref(false);
   const barcode = ref<string>("");
   const products = ref<BarcodeProduct[] | null>(null);
   const selectedRow = ref(-1);
   const errorMessage = ref<string | null>(null);
+
+  const canCreateUnknown = computed(
+    () =>
+      lookupFinished.value &&
+      !searching.value &&
+      barcode.value !== "" &&
+      (!products.value || products.value.length === 0)
+  );
 
   type BarcodeTableHeader = {
     text: string;
@@ -163,6 +175,7 @@
     const cleanup = registerOpenDialogCallback(DialogID.ProductImport, params => {
       selectedRow.value = -1;
       searching.value = false;
+      lookupFinished.value = false;
       errorMessage.value = null;
 
       if (params?.barcode) {
@@ -184,6 +197,37 @@
   });
 
   const api = useUserApi();
+
+  function createUnknownItem() {
+    const code = barcode.value.trim();
+    if (!code) {
+      return;
+    }
+
+    const product: BarcodeProduct = {
+      barcode: code,
+      imageBase64: "",
+      imageURL: "",
+      manufacturer: "",
+      modelNumber: code,
+      notes: "",
+      search_engine_name: "",
+      item: {
+        name: t("components.item.product_import.unknown_name"),
+        description: "",
+        entityTypeId: "",
+        quantity: 1,
+        modelNumber: code,
+        tagIds: [],
+      },
+    };
+    openDialog(DialogID.CreateEntity, {
+      params: {
+        baseType: "item",
+        product,
+      },
+    });
+  }
 
   function createItem() {
     if (
@@ -216,6 +260,7 @@
 
     const normalized = normalizeBarcodeInput(raw);
     if (!normalized) {
+      lookupFinished.value = false;
       errorMessage.value = t("components.item.product_import.error_invalid_barcode");
       console.error(errorMessage.value);
       return;
@@ -224,6 +269,7 @@
 
     products.value = null;
     searching.value = true;
+    lookupFinished.value = false;
 
     try {
       const result = await api.products.searchFromBarcode(normalized);
@@ -242,6 +288,7 @@
       console.error(errorMessage.value);
     } finally {
       searching.value = false;
+      lookupFinished.value = true;
     }
   }
 

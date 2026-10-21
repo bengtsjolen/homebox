@@ -268,6 +268,8 @@
                 "error_exception": "Exception occured while retrieving item barcode: ",
                 "error_invalid_barcode": "Invalid barcode or ISBN",
                 "error_not_found": "No product found with given barcode.",
+                "create_unknown": "Create as Unknown",
+                "unknown_name": "Unknown",
                 "import_selected": "Import selected",
                 "search_item": "Search product",
                 "title": "Import product"

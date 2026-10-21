@@ -268,6 +268,8 @@
                 "error_exception": "Undantag inträffade vid hämtning av artikelstreckkod: ",
                 "error_invalid_barcode": "Ogiltig streckkod eller ISBN",
                 "error_not_found": "Ingen produkt hittad med angiven streckkod.",
+                "create_unknown": "Skapa som Okänd",
+                "unknown_name": "Okänd",
                 "import_selected": "Importera valda",
                 "search_item": "Sök produkt",
                 "title": "Importera produkt"
