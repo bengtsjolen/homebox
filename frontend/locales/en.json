@@ -615,12 +615,13 @@
         "no_saved_searches": "No saved searches",
         "notes": "Notes",
         "cover_lookup": {
-            "alternate_isbn": "Alternate ISBN",
+            "alternate_isbn": "Alternate ISBN or image URL",
             "failed": "Could not fetch the cover",
             "fetch": "Fetch cover",
             "fetched": "Cover added from the alternate ISBN",
             "fetching": "Fetching cover",
             "no_cover": "No cover was found for that ISBN",
+            "placeholder": "978… or https://…",
             "title": "Book cover"
         },
         "only_with_photo": "Only items with photo",

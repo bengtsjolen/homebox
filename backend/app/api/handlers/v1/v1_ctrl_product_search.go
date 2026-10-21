@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/repo"
 	"github.com/sysadminsmedia/homebox/backend/internal/sys/config"
+	"github.com/sysadminsmedia/homebox/backend/internal/sys/validate"
 	"github.com/sysadminsmedia/homebox/backend/internal/web/adapters"
 	"golang.org/x/text/unicode/norm"
 )
@@ -1282,8 +1284,113 @@ func lookupDNB(isbn13 string) ([]repo.BarcodeProduct, error) {
 	return []repo.BarcodeProduct{product}, nil
 }
 
+// lookupHostIPs resolves a cover host. Tests replace it so a public address can be simulated.
+var lookupHostIPs = net.LookupIP
+
+func parsePublicImageURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil {
+		return nil, errors.New("cover URL must be an http or https address")
+	}
+	if parsed.Hostname() == "" {
+		return nil, errors.New("cover URL must be an http or https address")
+	}
+	return parsed, nil
+}
+
+func isPublicIP(ip net.IP) bool {
+	if ip == nil ||
+		ip.IsPrivate() ||
+		ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsInterfaceLocalMulticast() {
+		return false
+	}
+	v4 := ip.To4()
+	if v4 != nil && (v4[0] == 0 || (v4[0] == 100 && v4[1]&0xc0 == 64)) {
+		return false
+	}
+	return true
+}
+
+func ensurePublicHost(host string) error {
+	ips, err := lookupHostIPs(host)
+	if err != nil || len(ips) == 0 {
+		return errors.New("cover host could not be resolved")
+	}
+	for _, ip := range ips {
+		if !isPublicIP(ip) {
+			return errors.New("cover URL must point at a public image")
+		}
+	}
+	return nil
+}
+
+func publicImageClient() *http.Client {
+	client := *barcodeHTTPClient
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("too many redirects")
+		}
+		if req.URL.Scheme != "https" && req.URL.Scheme != "http" {
+			return errors.New("redirect must be http or https")
+		}
+		return ensurePublicHost(req.URL.Hostname())
+	}
+	return &client
+}
+
+func fetchPublicImage(raw string) (string, error) {
+	parsed, err := parsePublicImageURL(raw)
+	if err != nil {
+		return "", err
+	}
+	if err := ensurePublicHost(parsed.Hostname()); err != nil {
+		return "", err
+	}
+	return fetchImageBase64WithClient(publicImageClient(), parsed.String())
+}
+
+// HandleCoverFromURL godoc
+//
+//	@Summary	Fetch a cover image from a URL
+//	@Tags		Items
+//	@Produce	json
+//	@Param		url	query		string	true	"https image address"
+//	@Success	200	{object}	map[string]string
+//	@Router		/v1/products/cover-from-url [GET]
+//	@Security	Bearer
+func (ctrl *V1Controller) HandleCoverFromURL() errchain.HandlerFunc {
+	type query struct {
+		URL string `schema:"url" validate:"required,max=2000"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) error {
+		q, err := adapters.DecodeQuery[query](r)
+		if err != nil {
+			return err
+		}
+
+		image, err := fetchPublicImage(q.URL)
+		if err != nil {
+			log.Debug().Err(err).Msg("cover url fetch failed")
+			return validate.NewRequestError(errors.New("could not fetch an image from that URL"), http.StatusBadRequest)
+		}
+		return server.JSON(w, http.StatusOK, struct {
+			ImageBase64 string `json:"imageBase64"`
+		}{ImageBase64: image})
+	}
+}
+
 // fetchImageBase64 fetches an image from the given HTTPS URL and returns it as a base64-encoded data URI.
 func fetchImageBase64(imageURL string) (string, error) {
+	return fetchImageBase64WithClient(barcodeHTTPClient, imageURL)
+}
+
+func fetchImageBase64WithClient(client *http.Client, imageURL string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, imageURL, nil)
 	if err != nil {
 		return "", err
@@ -1294,7 +1401,7 @@ func fetchImageBase64(imageURL string) (string, error) {
 		req.Header.Set("Referer", "https://books.google.com/")
 	}
 
-	res, err := barcodeHTTPClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1324,6 +1431,10 @@ func fetchImageBase64(imageURL string) (string, error) {
 		prefix = "data:image/jpeg;base64,"
 	case "image/png":
 		prefix = "data:image/png;base64,"
+	case "image/gif":
+		prefix = "data:image/gif;base64,"
+	case "image/webp":
+		prefix = "data:image/webp;base64,"
 	default:
 		return "", fmt.Errorf("unsupported image type: %s", mimeType)
 	}

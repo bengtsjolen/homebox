@@ -609,12 +609,13 @@
         "no_results": "Inga föremål hittades",
         "notes": "Anteckningar",
         "cover_lookup": {
-            "alternate_isbn": "Alternativt ISBN",
+            "alternate_isbn": "Alternativt ISBN eller bildadress",
             "failed": "Kunde inte hämta omslaget",
             "fetch": "Hämta omslag",
             "fetched": "Omslag tillagt från det alternativa ISBN-numret",
             "fetching": "Hämtar omslag",
             "no_cover": "Inget omslag hittades för det ISBN-numret",
+            "placeholder": "978… eller https://…",
             "title": "Bokomslag"
         },
         "only_with_photo": "Endast artiklar med foto",

@@ -3,6 +3,7 @@ package v1
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -848,5 +849,62 @@ func TestBarcodeSearchUsesDNBWhenOtherBookSourcesMiss(t *testing.T) {
 	}
 	if products[0].Item.Name != "Kraftwerk: future music from Germany" || products[0].Manufacturer != "Uwe Schütte" {
 		t.Fatalf("unexpected book: %+v", products[0])
+	}
+}
+
+func TestCoverFromURLRejectsPrivateAddresses(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1/cover.jpg",
+		"https://192.168.1.20/cover.jpg",
+		"http://localhost/cover.jpg",
+		"https://user:pass@example.com/cover.jpg",
+		"file:///tmp/cover.jpg",
+	} {
+		if _, err := fetchPublicImage(raw); err == nil {
+			t.Fatalf("expected %s to be rejected", raw)
+		}
+	}
+}
+
+func TestCoverFromURLFetchesAPublicImage(t *testing.T) {
+	originalClient := barcodeHTTPClient
+	originalLookup := lookupHostIPs
+	t.Cleanup(func() {
+		barcodeHTTPClient = originalClient
+		lookupHostIPs = originalLookup
+	})
+
+	lookupHostIPs = func(host string) ([]net.IP, error) {
+		if host != "covers.example" {
+			t.Errorf("unexpected host %s", host)
+		}
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9")
+	barcodeHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "https://covers.example/cover.jpg" {
+			t.Errorf("unexpected url %s", r.URL)
+		}
+		header := make(http.Header)
+		header.Set("Content-Type", "image/jpeg")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(strings.NewReader(string(jpeg))),
+			Request:    r,
+		}, nil
+	})}
+
+	handler := (&V1Controller{}).HandleCoverFromURL()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?url="+url.QueryEscape("https://covers.example/cover.jpg"), nil)
+	if err := handler(recorder, request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "data:image/jpeg;base64,") {
+		t.Fatalf("expected a jpeg data URI, got %s", recorder.Body.String())
 	}
 }

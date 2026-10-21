@@ -158,19 +158,55 @@
     { immediate: true }
   );
 
+  function coverFilename(dataURL: string): string {
+    if (dataURL.startsWith("data:image/png")) {
+      return "cover.png";
+    }
+    if (dataURL.startsWith("data:image/webp")) {
+      return "cover.webp";
+    }
+    if (dataURL.startsWith("data:image/gif")) {
+      return "cover.gif";
+    }
+    return "cover.jpg";
+  }
+
+  async function uploadCover(itemId: string, dataURL: string) {
+    const filename = coverFilename(dataURL);
+    const file = dataURLtoFile(dataURL, filename);
+    return api.items.attachments.add(itemId, file, filename, AttachmentTypes.Photo, true);
+  }
+
   async function fetchCoverFromIsbn() {
     const current = item.value;
     if (!current) {
       return;
     }
-    const isbn = alternateIsbn.value.trim().replace(/[\s\p{Pd}]+/gu, "").toUpperCase();
-    if (!isbn) {
+    const raw = alternateIsbn.value.trim();
+    if (!raw) {
       toast.error(t("items.cover_lookup.no_cover"));
       return;
     }
 
     fetchingCover.value = true;
     try {
+      if (/^https?:\/\//i.test(raw)) {
+        const result = await api.products.coverFromURL(raw);
+        if (result.error || !result.data?.imageBase64) {
+          toast.error(t("items.cover_lookup.failed"));
+          return;
+        }
+        const uploaded = await uploadCover(current.id, result.data.imageBase64);
+        if (uploaded.error) {
+          toast.error(t("items.cover_lookup.failed"));
+          return;
+        }
+        await refresh();
+        toast.success(t("items.cover_lookup.fetched"));
+        return;
+      }
+
+      const isbn = raw.replace(/[\s\p{Pd}]+/gu, "").toUpperCase();
       const result = await api.products.searchFromBarcode(isbn);
       const product = result.data?.find(entry => entry.imageBase64);
       if (result.error || !product) {
@@ -178,8 +214,7 @@
         return;
       }
 
-      const file = dataURLtoFile(product.imageBase64, "cover.jpg");
-      const uploaded = await api.items.attachments.add(current.id, file, "cover.jpg", AttachmentTypes.Photo, true);
+      const uploaded = await uploadCover(current.id, product.imageBase64);
       if (uploaded.error) {
         toast.error(t("items.cover_lookup.failed"));
         return;
@@ -196,7 +231,7 @@
         assetId: current.assetId,
         entityTypeId: current.entityType?.id || "",
       };
-      const saved = await api.items.update(item.value.id, payload);
+      const saved = await api.items.update(current.id, payload);
       if (saved.error || !saved.data) {
         toast.error(t("items.cover_lookup.failed"));
         return;
@@ -900,6 +935,7 @@
               <Input
                 id="alternate-isbn"
                 v-model="alternateIsbn"
+                :placeholder="$t('items.cover_lookup.placeholder')"
                 @focus="alternateIsbnFocused = true"
                 @blur="alternateIsbnFocused = false"
               />
