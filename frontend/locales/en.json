@@ -626,6 +626,14 @@
             "placeholder": "978… or https://…",
             "title": "Book cover"
         },
+        "product_lookup": {
+            "failed": "Could not look up that code",
+            "filled": "Details filled in from the code",
+            "filled_unsaved": "Details filled in. Save to keep them.",
+            "looking_up": "Looking up",
+            "not_found": "No product was found for that code",
+            "repopulate": "Fill in from model number"
+        },
         "only_with_photo": "Only items with photo",
         "only_without_photo": "Only items without photo",
         "options": "Options",

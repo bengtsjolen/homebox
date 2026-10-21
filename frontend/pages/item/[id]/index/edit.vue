@@ -4,6 +4,14 @@
   import { toast } from "@/components/ui/sonner";
   import type { ItemAttachment, EntityFieldData, EntityOut, EntityUpdate } from "~~/lib/api/types/data-contracts";
   import { AttachmentTypes } from "~~/lib/api/types/non-generated";
+  import { dataURLtoFile } from "~/components/Form/photo-uploader";
+  import {
+    clipText,
+    normalizeProductCode,
+    notesWithProductSource,
+    pickLookedUpProduct,
+    productSourceLabel,
+  } from "~/composables/product-lookup";
   import { useTagStore } from "~/stores/tags";
   import MdiLoading from "~icons/mdi/loading";
   import MdiDelete from "~icons/mdi/delete";
@@ -49,6 +57,70 @@
   const entityTypeStore = useEntityTypeStore();
 
   const itemId = computed<string>(() => route.params.id as string);
+  const repopulating = ref(false);
+
+  function coverFilename(dataURL: string): string {
+    if (dataURL.startsWith("data:image/png")) {
+      return "cover.png";
+    }
+    if (dataURL.startsWith("data:image/webp")) {
+      return "cover.webp";
+    }
+    if (dataURL.startsWith("data:image/gif")) {
+      return "cover.gif";
+    }
+    return "cover.jpg";
+  }
+
+  async function repopulateFromModelNumber() {
+    const code = normalizeProductCode(item.value?.modelNumber || "");
+    if (!item.value || !code) {
+      toast.error(t("items.product_lookup.not_found"));
+      return;
+    }
+
+    repopulating.value = true;
+    try {
+      const result = await api.products.searchFromBarcode(code);
+      const product = pickLookedUpProduct(result.data);
+      if (result.error || !product?.item.name?.trim()) {
+        toast.error(result.error ? t("items.product_lookup.failed") : t("items.product_lookup.not_found"));
+        return;
+      }
+
+      item.value.name = clipText(product.item.name.trim(), 255);
+      if (product.item.description?.trim()) {
+        item.value.description = clipText(product.item.description, 1000);
+      }
+      if (product.manufacturer?.trim()) {
+        item.value.manufacturer = clipText(product.manufacturer, 255);
+      }
+      item.value.notes = notesWithProductSource(item.value.notes || "", productSourceLabel(product));
+
+      if (product.imageBase64) {
+        const filename = coverFilename(product.imageBase64);
+        const uploaded = await api.items.attachments.add(
+          itemId.value,
+          dataURLtoFile(product.imageBase64, filename),
+          filename,
+          AttachmentTypes.Photo,
+          true
+        );
+        if (uploaded.error || !uploaded.data) {
+          toast.error(t("items.product_lookup.failed"));
+          return;
+        }
+        item.value.attachments = uploaded.data.attachments;
+      }
+
+      toast.success(t("items.product_lookup.filled_unsaved"));
+    } catch (error) {
+      console.error(error);
+      toast.error(t("items.product_lookup.failed"));
+    } finally {
+      repopulating.value = false;
+    }
+  }
 
   const tagStore = useTagStore();
   const tags = computed(() => tagStore.tags);
@@ -738,6 +810,17 @@
                   :max-length="field.maxLength"
                   :min-length="field.minLength"
                 />
+                <Button
+                  v-if="field.ref === 'modelNumber'"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="mt-2"
+                  :disabled="repopulating || !item.modelNumber?.trim()"
+                  @click="repopulateFromModelNumber"
+                >
+                  {{ repopulating ? $t("items.product_lookup.looking_up") : $t("items.product_lookup.repopulate") }}
+                </Button>
                 <FormTextField
                   v-else-if="field.type === 'number'"
                   v-model.number="item[field.ref]"

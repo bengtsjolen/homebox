@@ -6,6 +6,13 @@
   import type { EntityUpdate, ItemAttachment } from "~~/lib/api/types/data-contracts";
   import { AttachmentTypes } from "~~/lib/api/types/non-generated";
   import { dataURLtoFile } from "~/components/Form/photo-uploader";
+  import {
+    clipText,
+    normalizeProductCode,
+    notesWithProductSource,
+    pickLookedUpProduct,
+    productSourceLabel,
+  } from "~/composables/product-lookup";
   import { Input } from "@/components/ui/input";
   import MdiPackageVariant from "~icons/mdi/package-variant";
   import MdiPlus from "~icons/mdi/plus";
@@ -124,6 +131,7 @@
 
   const alternateIsbn = ref("");
   const fetchingCover = ref(false);
+  const repopulating = ref(false);
   const alternateIsbnFocused = ref(false);
 
   function readAlternateIsbn(notes: string): string {
@@ -245,6 +253,60 @@
       toast.error(t("items.cover_lookup.failed"));
     } finally {
       fetchingCover.value = false;
+    }
+  }
+
+  async function repopulateFromModelNumber() {
+    const current = item.value;
+    const code = normalizeProductCode(current?.modelNumber || "");
+    if (!current || !code) {
+      toast.error(t("items.product_lookup.not_found"));
+      return;
+    }
+
+    repopulating.value = true;
+    try {
+      const result = await api.products.searchFromBarcode(code);
+      const product = pickLookedUpProduct(result.data);
+      if (result.error || !product?.item.name?.trim()) {
+        toast.error(result.error ? t("items.product_lookup.failed") : t("items.product_lookup.not_found"));
+        return;
+      }
+
+      if (product.imageBase64) {
+        const uploaded = await uploadCover(current.id, product.imageBase64);
+        if (uploaded.error) {
+          toast.error(t("items.product_lookup.failed"));
+          return;
+        }
+      }
+
+      const source = productSourceLabel(product);
+      const payload: EntityUpdate = {
+        ...current,
+        parentId: current.parent?.id || null,
+        locationId: current.locationId || null,
+        tagIds: current.tags?.map(tag => tag.id) ?? [],
+        name: clipText(product.item.name.trim(), 255),
+        description: clipText(product.item.description || current.description || "", 1000),
+        manufacturer: clipText(product.manufacturer || current.manufacturer || "", 255),
+        notes: notesWithProductSource(current.notes || "", source),
+        assetId: current.assetId,
+        entityTypeId: current.entityType?.id || "",
+      };
+      const saved = await api.items.update(current.id, payload);
+      if (saved.error || !saved.data) {
+        toast.error(t("items.product_lookup.failed"));
+        return;
+      }
+      item.value = saved.data;
+      await refresh();
+      toast.success(t("items.product_lookup.filled"));
+    } catch (error) {
+      console.error(error);
+      toast.error(t("items.product_lookup.failed"));
+    } finally {
+      repopulating.value = false;
     }
   }
 
@@ -942,6 +1004,13 @@
             </div>
             <Button :disabled="fetchingCover || !alternateIsbn.trim()" @click="fetchCoverFromIsbn">
               {{ fetchingCover ? $t("items.cover_lookup.fetching") : $t("items.cover_lookup.fetch") }}
+            </Button>
+            <Button
+              variant="outline"
+              :disabled="repopulating || !item.modelNumber?.trim()"
+              @click="repopulateFromModelNumber"
+            >
+              {{ repopulating ? $t("items.product_lookup.looking_up") : $t("items.product_lookup.repopulate") }}
             </Button>
           </div>
         </BaseCard>

@@ -620,6 +620,14 @@
             "placeholder": "978… eller https://…",
             "title": "Bokomslag"
         },
+        "product_lookup": {
+            "failed": "Kunde inte hämta uppgifter för den koden",
+            "filled": "Uppgifterna har fyllts i från koden",
+            "filled_unsaved": "Uppgifterna har fyllts i. Spara för att behålla dem.",
+            "looking_up": "Hämtar uppgifter",
+            "not_found": "Ingen produkt hittades för den koden",
+            "repopulate": "Fyll i från modellnummer"
+        },
         "only_with_photo": "Endast artiklar med foto",
         "only_without_photo": "Endast artiklar utan foto",
         "options": "Alternativ",
