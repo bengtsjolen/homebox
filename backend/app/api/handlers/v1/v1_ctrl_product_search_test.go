@@ -495,7 +495,7 @@ func TestBuildGoogleBooksBarcodeProduct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse cover: %v", err)
 	}
-	if imageURL.Scheme != "https" || imageURL.Host != "books.google.com" || imageURL.Query().Get("zoom") != "3" {
+	if imageURL.Scheme != "https" || imageURL.Host != "books.google.com" || imageURL.Query().Get("zoom") != "1" {
 		t.Fatalf("unexpected cover: %s", product.ImageURL)
 	}
 }
@@ -539,10 +539,40 @@ func TestGoogleBooksSiblingCoverUsesSameYearEdition(t *testing.T) {
 		Identifier string `json:"identifier"`
 	}{{Type: "ISBN_13", Identifier: "9780141986753"}}
 	sameYear.VolumeInfo.ImageLinks.Thumbnail = "https://books.google.com/books/content?id=same&zoom=1"
+	sameYear.SaleInfo.IsEbook = true
 
-	cover := googleBooksSiblingCover("9781802060980", source, []googleBooksVolume{source, otherYear, sameYear})
-	if !strings.Contains(cover, "id=same") {
-		t.Fatalf("expected the 2020 edition cover, got %s", cover)
+	paperback := googleBooksVolume{}
+	paperback.VolumeInfo.Title = "Kraftwerk"
+	paperback.VolumeInfo.Subtitle = "Future Music from Germany"
+	paperback.VolumeInfo.Authors = []string{"Uwe Schutte"}
+	paperback.VolumeInfo.PublishedDate = "2020"
+	paperback.VolumeInfo.PageCount = 336
+	paperback.VolumeInfo.IndustryIdentifiers = []struct {
+		Type       string `json:"type"`
+		Identifier string `json:"identifier"`
+	}{{Type: "ISBN_13", Identifier: "9780141986753"}}
+	paperback.VolumeInfo.ImageLinks.Thumbnail = "https://books.google.com/books/content?id=paper&zoom=1"
+
+	shortTitle := googleBooksVolume{}
+	shortTitle.VolumeInfo.Title = "Kraftwerk"
+	shortTitle.VolumeInfo.Authors = []string{"Uwe Schütte"}
+	shortTitle.VolumeInfo.PublishedDate = "2020"
+	shortTitle.VolumeInfo.ImageLinks.Thumbnail = "https://books.google.com/books/content?id=short&zoom=1"
+
+	cover := googleBooksSiblingCover("9781802060980", source, []googleBooksVolume{source, otherYear, sameYear, shortTitle, paperback})
+	if !strings.Contains(cover, "id=paper") {
+		t.Fatalf("expected the 2020 paperback cover, got %s", cover)
+	}
+}
+
+func TestGoogleBooksCoverUsesVolumeIDWhenLinksAreEmpty(t *testing.T) {
+	volume := googleBooksVolume{ID: "paperId"}
+	if googleBooksCoverURL(volume) != "" {
+		t.Fatal("expected no image link")
+	}
+	cover := googleBooksCoverURLOrVolume(volume)
+	if !strings.Contains(cover, "id=paperId") || !strings.Contains(cover, "books.google.com/books/content") {
+		t.Fatalf("expected a volume-id cover, got %s", cover)
 	}
 }
 
@@ -642,6 +672,12 @@ func TestBarcodeSearchUsesGoogleBooksKeyAndSiblingCover(t *testing.T) {
 	}
 	if google.Item.Name != "Kraftwerk: Future Music from Germany" {
 		t.Fatalf("unexpected title: %s", google.Item.Name)
+	}
+	if google.Item.Notes != "Source: Google Books" {
+		t.Fatalf("expected the source in notes, got %s", google.Item.Notes)
+	}
+	if google.ModelNumber != "9781802060980" {
+		t.Fatalf("expected the ISBN as model number, got %s", google.ModelNumber)
 	}
 }
 

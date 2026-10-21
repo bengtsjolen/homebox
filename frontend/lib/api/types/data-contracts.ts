@@ -759,6 +759,8 @@ export interface EntityCreate {
    * @maxLength 255
    */
   modelNumber?: string | null;
+  /** @maxLength 1000 */
+  notes?: string | null;
   /**
    * @minLength 1
    * @maxLength 255

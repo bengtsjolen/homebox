@@ -23,6 +23,7 @@ import (
 	"github.com/sysadminsmedia/homebox/backend/internal/data/repo"
 	"github.com/sysadminsmedia/homebox/backend/internal/sys/config"
 	"github.com/sysadminsmedia/homebox/backend/internal/web/adapters"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -642,6 +643,7 @@ const (
 )
 
 type googleBooksVolume struct {
+	ID         string `json:"id"`
 	VolumeInfo struct {
 		Title         string   `json:"title"`
 		Subtitle      string   `json:"subtitle"`
@@ -663,6 +665,9 @@ type googleBooksVolume struct {
 			Identifier string `json:"identifier"`
 		} `json:"industryIdentifiers"`
 	} `json:"volumeInfo"`
+	SaleInfo struct {
+		IsEbook bool `json:"isEbook"`
+	} `json:"saleInfo"`
 }
 
 type googleBooksResponse struct {
@@ -754,18 +759,11 @@ func normalizeGoogleBooksImageURL(imageURL string) string {
 		return ""
 	}
 
-	query := u.Query()
-	switch query.Get("zoom") {
-	case "1", "5":
-		query.Set("zoom", "3")
-		u.RawQuery = query.Encode()
-	}
-
 	return u.String()
 }
 
-func googleBooksCoverURL(info googleBooksVolume) string {
-	links := info.VolumeInfo.ImageLinks
+func googleBooksCoverURL(volume googleBooksVolume) string {
+	links := volume.VolumeInfo.ImageLinks
 	return normalizeGoogleBooksImageURL(firstNonEmpty(
 		links.ExtraLarge,
 		links.Large,
@@ -774,6 +772,17 @@ func googleBooksCoverURL(info googleBooksVolume) string {
 		links.Thumbnail,
 		links.SmallThumbnail,
 	))
+}
+
+func googleBooksCoverURLOrVolume(volume googleBooksVolume) string {
+	if cover := googleBooksCoverURL(volume); cover != "" {
+		return cover
+	}
+	// The Books site draws a cover from the volume id even when imageLinks is empty.
+	if id := strings.TrimSpace(volume.ID); id != "" {
+		return "https://books.google.com/books/content?id=" + url.QueryEscape(id) + "&printsec=frontcover&img=1&zoom=1"
+	}
+	return ""
 }
 
 func buildGoogleBooksBarcodeProduct(isbn13 string, volume googleBooksVolume) (repo.BarcodeProduct, bool) {
@@ -850,8 +859,9 @@ func bookTitleKey(title string, subtitle string) string {
 		full += " " + subtitle
 	}
 
+	full = foldLetters(full)
 	var b strings.Builder
-	for _, r := range strings.ToLower(full) {
+	for _, r := range full {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
 			b.WriteRune(r)
 		}
@@ -866,7 +876,7 @@ func authorsOverlap(left []string, right []string) bool {
 
 	tokens := make(map[string]struct{})
 	for _, name := range left {
-		for _, part := range strings.Fields(strings.ToLower(name)) {
+		for _, part := range strings.Fields(foldLetters(name)) {
 			part = strings.Trim(part, ",.;")
 			if len([]rune(part)) >= 3 {
 				tokens[part] = struct{}{}
@@ -874,7 +884,7 @@ func authorsOverlap(left []string, right []string) bool {
 		}
 	}
 	for _, name := range right {
-		for _, part := range strings.Fields(strings.ToLower(name)) {
+		for _, part := range strings.Fields(foldLetters(name)) {
 			part = strings.Trim(part, ",.;")
 			if _, ok := tokens[part]; ok {
 				return true
@@ -882,6 +892,23 @@ func authorsOverlap(left []string, right []string) bool {
 		}
 	}
 	return false
+}
+
+func foldLetters(value string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(strings.ToLower(value)) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func sameEditionTitle(source googleBooksVolume, candidate googleBooksVolume) bool {
+	left := bookTitleKey(source.VolumeInfo.Title, source.VolumeInfo.Subtitle)
+	right := bookTitleKey(candidate.VolumeInfo.Title, candidate.VolumeInfo.Subtitle)
+	return left != "" && left == right
 }
 
 func googleVolumeHasISBN(volume googleBooksVolume, isbn13 string) bool {
@@ -906,29 +933,64 @@ func googleBooksSiblingCover(isbn13 string, source googleBooksVolume, candidates
 		year = source.VolumeInfo.PublishedDate[:4]
 	}
 
-	var fallback string
+	bestCover := ""
+	bestScore := -1
 	for _, candidate := range candidates {
-		if googleVolumeHasISBN(candidate, isbn13) {
+		if year == "" || !strings.HasPrefix(candidate.VolumeInfo.PublishedDate, year) {
 			continue
 		}
-		if bookTitleKey(candidate.VolumeInfo.Title, candidate.VolumeInfo.Subtitle) != want {
+		if googleVolumeHasISBN(candidate, isbn13) || !sameEditionTitle(source, candidate) {
 			continue
 		}
 		if !authorsOverlap(source.VolumeInfo.Authors, candidate.VolumeInfo.Authors) {
 			continue
 		}
-		cover := googleBooksCoverURL(candidate)
+		cover := googleBooksCoverURLOrVolume(candidate)
 		if cover == "" {
 			continue
 		}
-		if year != "" && strings.HasPrefix(candidate.VolumeInfo.PublishedDate, year) {
-			return cover
+		// A printed edition outranks an ebook. Page count is not compared.
+		score := 1
+		if !candidate.SaleInfo.IsEbook {
+			score += 2
 		}
-		if fallback == "" {
-			fallback = cover
+		if score > bestScore {
+			bestCover = cover
+			bestScore = score
 		}
 	}
-	return fallback
+	return bestCover
+}
+
+func shortBookTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if head, _, ok := strings.Cut(title, ":"); ok && strings.TrimSpace(head) != "" {
+		return strings.TrimSpace(head)
+	}
+	return title
+}
+
+func editionSubtitle(volume googleBooksVolume) string {
+	if subtitle := strings.TrimSpace(volume.VolumeInfo.Subtitle); subtitle != "" {
+		return subtitle
+	}
+	if _, rest, ok := strings.Cut(volume.VolumeInfo.Title, ":"); ok {
+		return strings.TrimSpace(rest)
+	}
+	return ""
+}
+
+func sourceLabel(engine string) string {
+	switch engine {
+	case googleBooksImageHost:
+		return "Google Books"
+	case "openlibrary.org":
+		return "Open Library"
+	case dnbSearchEngineName:
+		return "Deutsche Nationalbibliothek"
+	default:
+		return engine
+	}
 }
 
 func googleQueryTerm(prefix string, value string) string {
@@ -942,11 +1004,11 @@ func googleQueryTerm(prefix string, value string) string {
 	return prefix + value
 }
 
-func fetchGoogleBooksVolumes(apiKey string, queryText string) ([]googleBooksVolume, error) {
+func fetchGoogleBooksVolumes(apiKey string, queryText string, maxResults int) ([]googleBooksVolume, error) {
 	query := url.Values{}
 	query.Set("q", queryText)
 	query.Set("printType", "books")
-	query.Set("maxResults", "5")
+	query.Set("maxResults", strconv.Itoa(maxResults))
 	if strings.TrimSpace(apiKey) != "" {
 		query.Set("key", strings.TrimSpace(apiKey))
 	}
@@ -985,7 +1047,7 @@ func fetchGoogleBooksVolumes(apiKey string, queryText string) ([]googleBooksVolu
 }
 
 func lookupGoogleBooks(apiKey string, isbn13 string) ([]repo.BarcodeProduct, error) {
-	items, err := fetchGoogleBooksVolumes(apiKey, "isbn:"+isbn13)
+	items, err := fetchGoogleBooksVolumes(apiKey, "isbn:"+isbn13, 5)
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}
@@ -1002,18 +1064,25 @@ func lookupGoogleBooks(apiKey string, isbn13 string) ([]repo.BarcodeProduct, err
 		product.ImageURL = googleBooksSiblingCover(isbn13, volume, items)
 	}
 	if product.ImageURL == "" && strings.TrimSpace(apiKey) != "" {
-		query := googleQueryTerm("intitle:", volume.VolumeInfo.Title)
+		// Ask for the same title and subtitle. Google prints those on two lines.
+		query := googleQueryTerm("intitle:", shortBookTitle(volume.VolumeInfo.Title))
+		if subtitle := editionSubtitle(volume); subtitle != "" {
+			query = strings.TrimSpace(query + " " + googleQueryTerm("intitle:", subtitle))
+		}
 		if len(volume.VolumeInfo.Authors) > 0 {
 			if author := googleQueryTerm("inauthor:", volume.VolumeInfo.Authors[0]); author != "" {
 				query = strings.TrimSpace(query + " " + author)
 			}
 		}
-		related, err := fetchGoogleBooksVolumes(apiKey, query)
+		related, err := fetchGoogleBooksVolumes(apiKey, query, 10)
 		if err != nil {
 			log.Warn().Msg("google books edition search failed: " + err.Error())
 		} else if cover := googleBooksSiblingCover(isbn13, volume, related); cover != "" {
 			product.ImageURL = cover
 		}
+	}
+	if product.ImageURL == "" {
+		product.ImageURL = googleBooksCoverURLOrVolume(volume)
 	}
 	return []repo.BarcodeProduct{product}, nil
 }
@@ -1215,7 +1284,17 @@ func lookupDNB(isbn13 string) ([]repo.BarcodeProduct, error) {
 
 // fetchImageBase64 fetches an image from the given HTTPS URL and returns it as a base64-encoded data URI.
 func fetchImageBase64(imageURL string) (string, error) {
-	res, err := barcodeHTTPClient.Get(imageURL)
+	req, err := http.NewRequest(http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Homebox/1.0 (https://github.com/sysadminsmedia/homebox)")
+	if parsed, err := url.Parse(imageURL); err == nil && isAllowedGoogleBooksImageHost(parsed.Hostname()) {
+		// Google serves these cover URLs only when the request comes from Books.
+		req.Header.Set("Referer", "https://books.google.com/")
+	}
+
+	res, err := barcodeHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1367,6 +1446,21 @@ func (ctrl *V1Controller) HandleProductSearchFromBarcode(conf config.BarcodeAPIC
 		products := make([]repo.BarcodeProduct, 0, len(results))
 		for _, result := range results {
 			products = append(products, result...)
+		}
+		for i := range products {
+			if products[i].Barcode != "" {
+				if strings.TrimSpace(products[i].ModelNumber) == "" {
+					products[i].ModelNumber = products[i].Barcode
+				}
+				if strings.TrimSpace(products[i].Item.ModelNumber) == "" {
+					products[i].Item.ModelNumber = products[i].Barcode
+				}
+			}
+			if strings.TrimSpace(products[i].Item.Notes) == "" {
+				if label := sourceLabel(products[i].SearchEngineName); label != "" {
+					products[i].Item.Notes = "Source: " + label
+				}
+			}
 		}
 
 		// Retrieve images if possible

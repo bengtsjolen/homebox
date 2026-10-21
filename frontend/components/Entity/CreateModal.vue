@@ -378,6 +378,7 @@
     // Populated by the barcode product-import flow; passed through on create (#1578).
     manufacturer: "",
     modelNumber: "",
+    notes: "",
     tags: [] as string[],
     photos: [] as PhotoPreview[],
   });
@@ -587,6 +588,7 @@
           // created item isn't missing manufacturer/model (#1578).
           form.manufacturer = params.product.manufacturer ?? "";
           form.modelNumber = params.product.modelNumber ?? "";
+          form.notes = params.product.item.notes ?? "";
 
           if (params.product.imageURL) {
             appendPhotos([
@@ -696,6 +698,7 @@
         description: form.description,
         manufacturer: form.manufacturer,
         modelNumber: form.modelNumber,
+        notes: form.notes,
         tagIds: form.tags,
         entityTypeId: selectedEntityType.value?.id || "",
       };
@@ -752,6 +755,7 @@
     form.color = "";
     form.manufacturer = "";
     form.modelNumber = "";
+    form.notes = "";
     form.photos = [];
     form.tags = [];
     selectedTemplate.value = null;

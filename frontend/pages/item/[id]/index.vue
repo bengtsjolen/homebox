@@ -3,7 +3,10 @@
   import { toast } from "@/components/ui/sonner";
   import type { AnyDetail, Detail, Details } from "~~/components/global/DetailsSection/types";
   import { filterZeroValues } from "~~/components/global/DetailsSection/types";
-  import type { ItemAttachment } from "~~/lib/api/types/data-contracts";
+  import type { EntityUpdate, ItemAttachment } from "~~/lib/api/types/data-contracts";
+  import { AttachmentTypes } from "~~/lib/api/types/non-generated";
+  import { dataURLtoFile } from "~/components/Form/photo-uploader";
+  import { Input } from "@/components/ui/input";
   import MdiPackageVariant from "~icons/mdi/package-variant";
   import MdiPlus from "~icons/mdi/plus";
   import MdiMinus from "~icons/mdi/minus";
@@ -116,6 +119,97 @@
 
     if (resp.data) {
       item.value = resp.data;
+    }
+  }
+
+  const alternateIsbn = ref("");
+  const fetchingCover = ref(false);
+  const alternateIsbnFocused = ref(false);
+
+  function readAlternateIsbn(notes: string): string {
+    const match = notes.match(/^Alternate ISBN:\s*(\S+)/m);
+    return match?.[1] ?? "";
+  }
+
+  function notesWithCoverLookup(notes: string, isbn: string, source: string): string {
+    const existingSource = notes.match(/^Source:\s*(.+)$/m)?.[1]?.trim() ?? "";
+    const kept = notes
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line !== "" && !line.startsWith("Alternate ISBN:") && !line.startsWith("Source:"));
+    const lines = [...kept];
+    const sourceLine = existingSource || source;
+    if (sourceLine) {
+      lines.unshift(`Source: ${sourceLine}`);
+    }
+    if (isbn) {
+      lines.push(`Alternate ISBN: ${isbn}`);
+    }
+    return lines.join("\n");
+  }
+
+  watch(
+    () => item.value?.notes,
+    notes => {
+      if (!alternateIsbnFocused.value) {
+        alternateIsbn.value = readAlternateIsbn(notes || "");
+      }
+    },
+    { immediate: true }
+  );
+
+  async function fetchCoverFromIsbn() {
+    const current = item.value;
+    if (!current) {
+      return;
+    }
+    const isbn = alternateIsbn.value.trim().replace(/[\s\p{Pd}]+/gu, "").toUpperCase();
+    if (!isbn) {
+      toast.error(t("items.cover_lookup.no_cover"));
+      return;
+    }
+
+    fetchingCover.value = true;
+    try {
+      const result = await api.products.searchFromBarcode(isbn);
+      const product = result.data?.find(entry => entry.imageBase64);
+      if (result.error || !product) {
+        toast.error(result.error ? t("items.cover_lookup.failed") : t("items.cover_lookup.no_cover"));
+        return;
+      }
+
+      const file = dataURLtoFile(product.imageBase64, "cover.jpg");
+      const uploaded = await api.items.attachments.add(current.id, file, "cover.jpg", AttachmentTypes.Photo, true);
+      if (uploaded.error) {
+        toast.error(t("items.cover_lookup.failed"));
+        return;
+      }
+
+      const source = (product.item.notes || "").replace(/^Source:\s*/, "") || product.search_engine_name;
+      const notes = notesWithCoverLookup(current.notes || "", isbn, source);
+      const payload: EntityUpdate = {
+        ...current,
+        parentId: current.parent?.id || null,
+        locationId: current.locationId || null,
+        tagIds: current.tags?.map(tag => tag.id) ?? [],
+        notes,
+        assetId: current.assetId,
+        entityTypeId: current.entityType?.id || "",
+      };
+      const saved = await api.items.update(item.value.id, payload);
+      if (saved.error || !saved.data) {
+        toast.error(t("items.cover_lookup.failed"));
+        return;
+      }
+      item.value = saved.data;
+      alternateIsbn.value = isbn;
+      await refresh();
+      toast.success(t("items.cover_lookup.fetched"));
+    } catch (error) {
+      console.error(error);
+      toast.error(t("items.cover_lookup.failed"));
+    } finally {
+      fetchingCover.value = false;
     }
   }
 
@@ -796,6 +890,24 @@
               </div>
             </template>
           </DetailsSection>
+        </BaseCard>
+
+        <BaseCard v-if="!hasNested">
+          <template #title> {{ $t("items.cover_lookup.title") }} </template>
+          <div class="flex flex-wrap items-end gap-3 px-6 pb-4">
+            <div class="min-w-48 flex-1">
+              <Label for="alternate-isbn">{{ $t("items.cover_lookup.alternate_isbn") }}</Label>
+              <Input
+                id="alternate-isbn"
+                v-model="alternateIsbn"
+                @focus="alternateIsbnFocused = true"
+                @blur="alternateIsbnFocused = false"
+              />
+            </div>
+            <Button :disabled="fetchingCover || !alternateIsbn.trim()" @click="fetchCoverFromIsbn">
+              {{ fetchingCover ? $t("items.cover_lookup.fetching") : $t("items.cover_lookup.fetch") }}
+            </Button>
+          </div>
         </BaseCard>
 
         <!-- anything in this is not rendered if on another page -->

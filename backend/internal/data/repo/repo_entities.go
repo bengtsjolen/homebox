@@ -108,6 +108,7 @@ type (
 		// barcode product-search import flow (#1578).
 		ModelNumber  string `json:"modelNumber"  validate:"max=255" extensions:"x-nullable,x-omitempty"`
 		Manufacturer string `json:"manufacturer" validate:"max=255" extensions:"x-nullable,x-omitempty"`
+		Notes        string `json:"notes"        validate:"max=1000" extensions:"x-nullable,x-omitempty"`
 
 		// Edges
 		TagIDs []uuid.UUID `json:"tagIds"`
@@ -1264,6 +1265,7 @@ func (r *EntityRepository) Create(ctx context.Context, gid uuid.UUID, data Entit
 		SetDescription(data.Description).
 		SetModelNumber(data.ModelNumber).
 		SetManufacturer(data.Manufacturer).
+		SetNotes(data.Notes).
 		SetGroupID(gid).
 		SetAssetID(int64(data.AssetID))
 
