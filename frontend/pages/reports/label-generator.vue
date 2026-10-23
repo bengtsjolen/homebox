@@ -50,6 +50,8 @@
     columns: 3,
     cardHeight: 37,
     cardWidth: 70,
+    keepoutTop: 0,
+    keepoutBottom: 0,
     keepoutLeft: 12,
     keepoutRight: 12,
     pageWidth: 210,
@@ -83,6 +85,8 @@
     card: {
       width: number;
       height: number;
+      pt: number;
+      pb: number;
       pl: number;
       pr: number;
     };
@@ -124,6 +128,8 @@
       card: {
         width: cardWidth,
         height: cardHeight,
+        pt: 0,
+        pb: 0,
         pl: 0,
         pr: 0,
       },
@@ -174,6 +180,16 @@
       {
         label: t("reports.label_generator.label_width"),
         ref: "cardWidth",
+      },
+      {
+        label: t("reports.label_generator.keepout_top"),
+        ref: "keepoutTop",
+        min: 0,
+      },
+      {
+        label: t("reports.label_generator.keepout_bottom"),
+        ref: "keepoutBottom",
+        min: 0,
       },
       {
         label: t("reports.label_generator.keepout_left"),
@@ -341,6 +357,8 @@
     card: {
       width: 0,
       height: 0,
+      pt: 0,
+      pb: 0,
       pl: 0,
       pr: 0,
     },
@@ -355,10 +373,11 @@
   });
 
   const qrSide = computed(() => {
-    const inner = Math.max(0, out.value.card.width - out.value.card.pl - out.value.card.pr);
-    const byHeight = out.value.card.height * 0.9;
-    const textReserve = Math.min(18, inner * 0.4);
-    return Math.max(0, Math.min(byHeight, inner - textReserve));
+    const card = out.value.card;
+    const innerWidth = Math.max(0, card.width - card.pl - card.pr);
+    const innerHeight = Math.max(0, card.height - card.pt - card.pb);
+    const textGap = innerWidth > 0 && innerHeight > 0 ? 2 : 0;
+    return Math.max(0, Math.min(innerHeight, innerWidth - textGap));
   });
 
   function finiteKeepout(value: unknown): number {
@@ -384,6 +403,8 @@
       cardHeight: displayProperties.cardHeight,
       cardWidth: displayProperties.cardWidth,
     });
+    out.value.card.pt = finiteKeepout(displayProperties.keepoutTop);
+    out.value.card.pb = finiteKeepout(displayProperties.keepoutBottom);
     out.value.card.pl = finiteKeepout(displayProperties.keepoutLeft);
     out.value.card.pr = finiteKeepout(displayProperties.keepoutRight);
 
@@ -573,7 +594,7 @@
         <div
           v-for="(item, idx) in row.items"
           :key="idx"
-          class="flex border-2"
+          class="flex items-center overflow-hidden border-2"
           :class="{
             'border-black': bordered && !!item,
             'border-transparent': !bordered || !item,
@@ -582,6 +603,8 @@
             height: `${out.card.height}${out.measure}`,
             width: `${out.card.width}${out.measure}`,
             boxSizing: 'border-box',
+            paddingTop: `${out.card.pt}${out.measure}`,
+            paddingBottom: `${out.card.pb}${out.measure}`,
             paddingLeft: `${out.card.pl}${out.measure}`,
             paddingRight: `${out.card.pr}${out.measure}`,
           }"
@@ -597,7 +620,10 @@
                 }"
               />
             </div>
-            <div class="ml-2 flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
+            <div
+              class="flex min-w-0 flex-1 flex-col justify-center overflow-hidden"
+              :style="{ marginLeft: qrSide > 0 ? `2${out.measure}` : '0' }"
+            >
               <div class="font-bold">{{ item.assetID }}</div>
               <div
                 v-if="getHomeBoxLineText(item)"
