@@ -50,6 +50,8 @@
     columns: 3,
     cardHeight: 37,
     cardWidth: 70,
+    keepoutLeft: 12,
+    keepoutRight: 12,
     pageWidth: 210,
     pageHeight: 297,
     pageTopPadding: 0,
@@ -81,6 +83,8 @@
     card: {
       width: number;
       height: number;
+      pl: number;
+      pr: number;
     };
     page: {
       width: number;
@@ -120,6 +124,8 @@
       card: {
         width: cardWidth,
         height: cardHeight,
+        pl: 0,
+        pr: 0,
       },
       page: {
         width: page.width,
@@ -168,6 +174,16 @@
       {
         label: t("reports.label_generator.label_width"),
         ref: "cardWidth",
+      },
+      {
+        label: t("reports.label_generator.keepout_left"),
+        ref: "keepoutLeft",
+        min: 0,
+      },
+      {
+        label: t("reports.label_generator.keepout_right"),
+        ref: "keepoutRight",
+        min: 0,
       },
       {
         label: t("reports.label_generator.page_width"),
@@ -325,6 +341,8 @@
     card: {
       width: 0,
       height: 0,
+      pl: 0,
+      pr: 0,
     },
     page: {
       width: 0,
@@ -335,6 +353,21 @@
       pr: 0,
     },
   });
+
+  const qrSide = computed(() => {
+    const inner = Math.max(0, out.value.card.width - out.value.card.pl - out.value.card.pr);
+    const byHeight = out.value.card.height * 0.9;
+    const textReserve = Math.min(18, inner * 0.4);
+    return Math.max(0, Math.min(byHeight, inner - textReserve));
+  });
+
+  function finiteKeepout(value: unknown): number {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      return 0;
+    }
+    return n;
+  }
 
   function calcPages() {
     // Set Out Dimensions
@@ -351,6 +384,8 @@
       cardHeight: displayProperties.cardHeight,
       cardWidth: displayProperties.cardWidth,
     });
+    out.value.card.pl = finiteKeepout(displayProperties.keepoutLeft);
+    out.value.card.pr = finiteKeepout(displayProperties.keepoutRight);
 
     const calc: Page[] = [];
 
@@ -546,6 +581,9 @@
           :style="{
             height: `${out.card.height}${out.measure}`,
             width: `${out.card.width}${out.measure}`,
+            boxSizing: 'border-box',
+            paddingLeft: `${out.card.pl}${out.measure}`,
+            paddingRight: `${out.card.pr}${out.measure}`,
           }"
         >
           <template v-if="item">
@@ -553,13 +591,13 @@
               <img
                 :src="item.url"
                 :style="{
-                  minWidth: `${out.card.height * 0.9}${out.measure}`,
-                  width: `${out.card.height * 0.9}${out.measure}`,
-                  height: `${out.card.height * 0.9}${out.measure}`,
+                  minWidth: `${qrSide}${out.measure}`,
+                  width: `${qrSide}${out.measure}`,
+                  height: `${qrSide}${out.measure}`,
                 }"
               />
             </div>
-            <div class="ml-2 flex flex-col justify-center">
+            <div class="ml-2 flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
               <div class="font-bold">{{ item.assetID }}</div>
               <div
                 v-if="getHomeBoxLineText(item)"
@@ -577,3 +615,11 @@
     </section>
   </div>
 </template>
+
+<style>
+  @media print {
+    @page {
+      margin: 0;
+    }
+  }
+</style>
